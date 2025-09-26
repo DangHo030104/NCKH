@@ -1,0 +1,40 @@
+#include <Arduino.h>
+#include <HardwareSerial.h>
+
+HardwareSerial MySerial(2); // UART2
+
+void setup() {
+  Serial.begin(9600);                       // Debug qua USB
+  MySerial.begin(9600, SERIAL_8N1, 16, 17); // RX=16, TX=17
+}
+
+void loop() {
+  if (MySerial.available()) {
+    String data = MySerial.readString(); // đọc hết 1 dòng
+    data.trim(); // xóa khoảng trắng thừa ở đầu/cuối
+
+    //Serial.print("Nhận từ STM32: ");
+    //Serial.println(data);
+
+    // Tìm vị trí dấu cách
+    int spaceIndex = data.indexOf(' ');
+
+    if (spaceIndex != -1) {
+      // Cắt nhiệt độ từ đầu đến dấu cách
+      String tempStr = data.substring(0, spaceIndex);
+      // Cắt độ ẩm từ sau dấu cách đến hết
+      String humiStr = data.substring(spaceIndex + 1);
+
+      // Chuyển sang float để xử lý số liệu
+      float temp = tempStr.toFloat();
+      float humi = humiStr.toFloat();
+
+      // In kết quả
+      Serial.print("Nhiệt độ: ");
+      Serial.println(temp, 2);     // In 2 chữ số thập phân
+      Serial.print("Độ ẩm: ");
+      Serial.println(humi, 2);
+    }
+  }
+}
+
