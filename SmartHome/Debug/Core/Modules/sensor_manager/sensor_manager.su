@@ -1,0 +1,5 @@
+sensor_manager.c:34:6:sensorManagerInit	8	static
+sensor_manager.c:39:6:sensorManagerUpdate	16	static
+sensor_manager.c:68:17:Read_LDR	16	static
+sensor_manager.c:78:6:Sensor_Radar_UART_Callback	16	static
+sensor_manager.c:104:13:Parse_LD2410_Frame	24	static

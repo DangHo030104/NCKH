@@ -1,0 +1,2 @@
+pc_serial_com.c:18:6:PC_Serial_ProcessCommand	344	static
+pc_serial_com.c:187:17:ReadNumberFromPC	32	static

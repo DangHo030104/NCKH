@@ -10,8 +10,16 @@ RM := rm -rf
 # All of the sources participating in the build are defined here
 -include sources.mk
 -include Drivers/STM32F1xx_HAL_Driver/Src/subdir.mk
+-include Core/lib/ssd1306/subdir.mk
+-include Core/lib/DHT11/subdir.mk
 -include Core/Startup/subdir.mk
 -include Core/Src/subdir.mk
+-include Core/Modules/user_interface/subdir.mk
+-include Core/Modules/touch_button/subdir.mk
+-include Core/Modules/smart_home_system/subdir.mk
+-include Core/Modules/sensor_manager/subdir.mk
+-include Core/Modules/pc_serial_com/subdir.mk
+-include Core/Modules/device_control/subdir.mk
 -include subdir.mk
 -include objects.mk
 

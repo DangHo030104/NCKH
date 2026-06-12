@@ -1,5 +1,6 @@
-Core/Src/ssd1306.o: ../Core/Src/ssd1306.c ../Core/Inc/ssd1306.h \
- ../Core/Inc/ssd1306_conf.h \
+Core/Modules/user_interface/user_interface.o: \
+ ../Core/Modules/user_interface/user_interface.c \
+ ../Core/Modules/user_interface/user_interface.h ../Core/Inc/main.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal.h \
  ../Core/Inc/stm32f1xx_hal_conf.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_rcc.h \
@@ -27,11 +28,17 @@ Core/Src/ssd1306.o: ../Core/Src/ssd1306.c ../Core/Inc/ssd1306.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_pwr.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h \
- ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h
+ ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h \
+ D:/STM32CUBEIDE/SmartHome/Core/Modules/sensor_manager/sensor_manager.h \
+ D:/STM32CUBEIDE/SmartHome/Core/Modules/device_control/device_control.h \
+ D:/STM32CUBEIDE/SmartHome/Core/lib/ssd1306/ssd1306.h \
+ D:/STM32CUBEIDE/SmartHome/Core/lib/ssd1306/ssd1306_conf.h \
+ D:/STM32CUBEIDE/SmartHome/Core/lib/ssd1306/ssd1306_fonts.h \
+ D:/STM32CUBEIDE/SmartHome/Core/lib/ssd1306/ssd1306.h
 
-../Core/Inc/ssd1306.h:
+../Core/Modules/user_interface/user_interface.h:
 
-../Core/Inc/ssd1306_conf.h:
+../Core/Inc/main.h:
 
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal.h:
 
@@ -88,3 +95,15 @@ Core/Src/ssd1306.o: ../Core/Src/ssd1306.c ../Core/Inc/ssd1306.h \
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h:
 
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h:
+
+D:/STM32CUBEIDE/SmartHome/Core/Modules/sensor_manager/sensor_manager.h:
+
+D:/STM32CUBEIDE/SmartHome/Core/Modules/device_control/device_control.h:
+
+D:/STM32CUBEIDE/SmartHome/Core/lib/ssd1306/ssd1306.h:
+
+D:/STM32CUBEIDE/SmartHome/Core/lib/ssd1306/ssd1306_conf.h:
+
+D:/STM32CUBEIDE/SmartHome/Core/lib/ssd1306/ssd1306_fonts.h:
+
+D:/STM32CUBEIDE/SmartHome/Core/lib/ssd1306/ssd1306.h:

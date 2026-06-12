@@ -1,0 +1,2 @@
+user_interface.c:20:6:userInterfaceInit	16	static
+user_interface.c:39:6:userInterfaceUpdate	88	static
