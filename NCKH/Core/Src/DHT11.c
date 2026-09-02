@@ -96,9 +96,15 @@ uint8_t DHT11_Read_Data(DHT11_DataTypedef *DHT)
         TCD = DHT11_Read(DHT);   // 8 bit: Temp float
         SUM = DHT11_Read(DHT);   // 8 bit: Checksum
 
+//        if (RHI + RHD + TCI + TCD == SUM) {
+//            DHT->Temperature = (float)TCI + (float)(TCD / 10.0);
+//            DHT->Humidity = (float)RHI + (float)(RHD / 10.0);
+//            return 1; // OK
+//        }
+
         if (RHI + RHD + TCI + TCD == SUM) {
-            DHT->Temperature = (float)TCI + (float)(TCD / 10.0);
-            DHT->Humidity = (float)RHI + (float)(RHD / 10.0);
+            DHT->Temperature = TCI;
+            DHT->Humidity = RHI;
             return 1; // OK
         }
     }
