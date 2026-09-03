@@ -10,7 +10,32 @@
 #include <ArduinoJson.h>
 #include <math.h>
 
-/* Private define/macro, variables ------------------------------------------------------------*/
+/* Private typedef -----------------------------------------------------------*/
+/* LORA STATE MACHINE */
+typedef enum
+{
+    LORA_IDLE,
+    WAIT_DATA,
+    WAIT_CMD_ACK
+} LoRaState;
+
+LoRaState loraState = LORA_IDLE;
+
+typedef struct
+{
+    uint8_t zone;
+    bool irr;
+} LoRaCommand;
+
+typedef struct
+{
+    float temperature;
+    float humidity;
+    float soil1;
+    float soil2;
+} SensorData;
+
+/* Private define/macro and Private variables ------------------------------------------------------------*/
 /* LORA E32 */
 #define TX_PIN 16
 #define RX_PIN 17
@@ -47,13 +72,14 @@ float T = 0, H = 0, SM1 = 0, SM2 = 0;
 
 /* MQTT PUBLISH */
 unsigned long lastMsg = 0;
-bool dataUpdated = false; // Flag: có dữ liệu mới để publish
 
 /* MASTER REQUEST (ESP32 -> STM32) */
 unsigned long lastRequest = 0;
-const unsigned long REQUEST_INTERVAL = 15000;
-const unsigned long DATA_TIMEOUT_MS = 5000;
-const unsigned long CMD_ACK_TIMEOUT_MS = 5000;
+const unsigned long REQUEST_INTERVAL = 10000;
+
+const unsigned long DATA_TIMEOUT_MS = 3000;    // Thời gian chờ DATA từ STM32 sau khi gửi REQ
+const unsigned long CMD_ACK_TIMEOUT_MS = 3000; // Thời gian chờ ACK từ STM32 sau khi gửi CMD
+
 const uint8_t MAX_CMD_RETRIES = 3;
 
 unsigned long lastMqttReconnectAttempt = 0;
@@ -63,29 +89,19 @@ unsigned long lastWiFiReconnectAttempt = 0;
 const unsigned long WIFI_RECONNECT_INTERVAL = 5000;
 bool wifiConnected = false;
 
-const unsigned long MQTT_PUBLISH_INTERVAL = 2000; 
+const unsigned long MQTT_PUBLISH_INTERVAL = 2000;
 
 /* SEQUENCE NUMBER */
 uint32_t sequenceNumber = 0;
 uint32_t waitingSeq = 0;
 
-/* LORA STATE MACHINE */
-enum LoraState
-{
-    LORA_IDLE,
-    WAIT_DATA,
-    WAIT_CMD_ACK
-};
-
-LoraState loraState = LORA_IDLE;
-
 /* PENDING COMMAND BUFFER */
-bool commandPending = false;
-String pendingCommand = "";             // Command mới nhất nhận được từ MQTT.
-String pendingCommandFrame = "";
-String activeCommand = "";              // Command đang được gửi đi, chờ ACK
-unsigned long loraStateStartedAt = 0;   // Lưu thời điểm bắt đầu chờ DATA hoặc ACK
+String pendingCommandFrame = "";      // Command frame đang được gửi đi, chờ ACK
+unsigned long loraStateStartedAt = 0; // Lưu thời điểm bắt đầu chờ DATA hoặc ACK
 uint8_t commandRetryCount = 0;
+
+QueueHandle_t commandQueue;
+QueueHandle_t sensorDataQueue;
 
 void printAuxState()
 {
@@ -104,28 +120,32 @@ void printAuxState()
 /* Get value from frame */
 bool getValue(const String &frame, const String &key, float &value)
 {
-    int pos = frame.indexOf(key);   // Tìm vị trí đầu tiên của key trong frame
-    if (pos == -1) return false;
-    
-    pos += key.length();            // Di chuyển (pointer) đến sau key để lấy value
+    int pos = frame.indexOf(key); // Tìm vị trí đầu tiên của key trong frame
+    if (pos == -1)
+        return false;
 
-    int end = frame.indexOf(',', pos);  
+    pos += key.length(); // Di chuyển (pointer) đến sau key để lấy value
+
+    int end = frame.indexOf(',', pos);
     if (end == -1)
     {
         end = frame.indexOf('>', pos);
     }
 
-    if (end == -1) return false;    // Frame không hợp lệ
+    if (end == -1)
+        return false; // Frame không hợp lệ
 
     String valueText = frame.substring(pos, end);
 
-    if (valueText.length() == 0) return false;  
+    if (valueText.length() == 0)
+        return false;
 
     char *parseEnd = nullptr;
-    const float parsedValue = strtof(valueText.c_str(), &parseEnd); 
+    const float parsedValue = strtof(valueText.c_str(), &parseEnd);
 
     /* Kiểm tra xem chuỗi có được phân tích thành công không */
-    if (parseEnd == valueText.c_str() || *parseEnd != '\0' || !isfinite(parsedValue)) return false;  
+    if (parseEnd == valueText.c_str() || *parseEnd != '\0' || !isfinite(parsedValue))
+        return false;
 
     value = parsedValue;
     return true;
@@ -157,7 +177,8 @@ uint32_t getSeq(const String &frame)
 bool handleDataFrame(const String &frame)
 {
     /* Kiểm tra frame bắt đầu bằng <DATA, và kết thúc bằng > */
-    if (!frame.startsWith("<DATA,") || !frame.endsWith(">")) return false;
+    if (!frame.startsWith("<DATA,") || !frame.endsWith(">"))
+        return false;
 
     float newT = 0;
     float newH = 0;
@@ -183,37 +204,33 @@ bool handleDataFrame(const String &frame)
 /* MQTT Client tự gọi hàm này khi nhận message từ MQTT Server */
 void mqttCallback(char *topic, byte *payload, unsigned int length)
 {
-    String messageTemp = "";
+    String msg = "";
 
     for (unsigned int i = 0; i < length; i++)
     {
-        messageTemp += (char)payload[i];
+        msg += (char)payload[i];
     }
 
-    Serial.println();
-    Serial.println("===================== MQTT Message Received ==================");
-
+    Serial.println("\n===================== MQTT Message Received ==================");
     Serial.print("MQTT Topic: ");
     Serial.print(topic);
     Serial.print(" | MQTT Message: ");
-    Serial.println(messageTemp);
+    Serial.println(msg);
 
     /* PARSE JSON */
     JsonDocument doc;
 
-    DeserializationError error = deserializeJson(doc, messageTemp); // Phân tích chuỗi JSON và lưu vào doc.
+    DeserializationError error = deserializeJson(doc, msg); // Phân tích chuỗi JSON và lưu vào doc.
 
     if (error)
     {
         Serial.print("JSON Error: ");
         Serial.println(error.c_str());
-
         return;
     }
 
     /* GET RELAY + STATE */
-    int relay = doc["relay"] | 0; // Đọc trường relay (1 hoặc 2)
-
+    int relay = doc["relay"] | 0;     // Lấy trường relay (1 hoặc 2)
     const char *state = doc["state"]; // Lấy trường state (ON/OFF)
 
     if (relay == 0 || state == nullptr)
@@ -222,125 +239,132 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
         return;
     }
 
-    /* ZONE 1 */
-    if (relay == 1)
+    /* CREATE LORA COMMAND */
+    LoRaCommand cmd = {};
+    cmd.zone = relay;
+
+    if (strcmp(state, "ON") == 0)
     {
-        if (strcmp(state, "ON") == 0) // So sánh chuỗi
-        {
-            pendingCommand = "ZONE=1,IRR=ON";
-            commandPending = true;
-        }
-        else if (strcmp(state, "OFF") == 0)
-        {
-            pendingCommand = "ZONE=1,IRR=OFF";
-            commandPending = true;
-        }
+        cmd.irr = true;
+    }
+    else if (strcmp(state, "OFF") == 0)
+    {
+        cmd.irr = false;
+    }
+    else
+    {
+        Serial.print("[ERROR] Invalid state: ");
+        Serial.println(state);
+        return;
     }
 
-    /* ZONE 2 */
-    else if (relay == 2)
+    /* Gửi command sang LoRaTask */
+    if (xQueueSend(commandQueue, &cmd, 0) == pdPASS)
     {
-        if (strcmp(state, "ON") == 0)
-        {
-            pendingCommand = "ZONE=2,IRR=ON";
-            commandPending = true;
-        }
-        else if (strcmp(state, "OFF") == 0)
-        {
-            pendingCommand = "ZONE=2,IRR=OFF";
-            commandPending = true;
-        }
+        Serial.print("[MQTT] CMD queued: ZONE=");
+        Serial.print(cmd.zone);
+        Serial.print(" IRR=");
+        Serial.println(cmd.irr ? "ON" : "OFF");
     }
-
-    if (commandPending)
+    else
     {
-        Serial.print("CMD queued: ");
-        Serial.println(pendingCommand);
+        Serial.println("[ERROR] CommandQueue FULL");
     }
 }
 
 void maintainWiFi()
 {
-    const wl_status_t status = WiFi.status();
+    wl_status_t status = WiFi.status();
 
+    /* WIFI CONNECTED */
     if (status == WL_CONNECTED)
     {
         if (!wifiConnected)
         {
             wifiConnected = true;
-            Serial.println("Wi-Fi connected!");
-            Serial.print("IP address: ");
-            Serial.println(WiFi.localIP());
-        }
 
+            Serial.println();
+            Serial.println("[WIFI] Connected");
+
+            Serial.print("[WIFI] IP: ");
+            Serial.println(WiFi.localIP());
+
+            /* Cho phép MQTT reconnect ngay sau khi WiFi vừa trở lại */
+            lastMqttReconnectAttempt = 0;
+        }
         return;
     }
 
+    /* WIFI LOST */
     if (wifiConnected)
     {
         wifiConnected = false;
-        Serial.println("Wi-Fi disconnected");
+
+        Serial.println();
+        Serial.println("[WIFI] Connection lost");
+
+        /* Khi WiFi mất thì đóng MQTT session cũ */
+        if (mqttClient.connected())
+        {
+            mqttClient.disconnect();
+            Serial.println("[MQTT] Disconnected due to WiFi loss");
+        }
     }
 
-    const unsigned long now = millis();
-
-    if (now - lastWiFiReconnectAttempt >= WIFI_RECONNECT_INTERVAL)
+    /* NON-BLOCKING WIFI RECONNECT */
+    if (millis() - lastWiFiReconnectAttempt >= WIFI_RECONNECT_INTERVAL)
     {
-        lastWiFiReconnectAttempt = now;
-        Serial.println("\nReconnecting to Wi-Fi...");
+        lastWiFiReconnectAttempt = millis();
+        Serial.println("[WIFI] Reconnecting...");
         WiFi.reconnect();
     }
 }
 
 void reconnectMQTT()
 {
-    if (mqttClient.connected()) 
-    {
-        Serial.println("ESP32 MQTT Broker Ready!");
+    if (WiFi.status() != WL_CONNECTED)
         return;
-    }
 
-    if (lastMqttReconnectAttempt != 0 && millis() - lastMqttReconnectAttempt < MQTT_RECONNECT_INTERVAL)
-    {
-        Serial.println("Waiting to reconnect to MQTT...");
-        return; 
-    }
+    if (mqttClient.connected())
+        return;
+
+    if (lastMqttReconnectAttempt != 0 &&
+        millis() - lastMqttReconnectAttempt < MQTT_RECONNECT_INTERVAL)
+        return;
 
     lastMqttReconnectAttempt = millis();
 
+    Serial.println("\n[MQTT] Connecting to HiveMQ Cloud...");
+
+    // Random Client ID tránh 2 client dùng cùng ID, ví dụ ESP32_Client-a83f
+    String clientId = "ESP32_Client-" + String(random(0, 0xffff), HEX);
+
+    if (mqttClient.connect(clientId.c_str(), mqtt_user, mqtt_password))
     {
-        Serial.print("Connecting HiveMQ Cloud...");
+        Serial.println("[MQTT] Connected!");
+        lastMqttReconnectAttempt = 0;
 
-        // Random Client ID tránh 2 client dùng cùng ID, ví dụ ESP32_Client-a83f
-        String clientId = "ESP32_Client-" + String(random(0, 0xffff), HEX);
+        // Subscribe control topic -> để broker chuyển message từ web về ESP32
+        mqttClient.subscribe(subscribe_topic);
 
-        if (mqttClient.connect(clientId.c_str(), mqtt_user, mqtt_password))
-        {
-            Serial.println("\nConnected!");
-            lastMqttReconnectAttempt = 0;
-
-            // Subscribe topic: control -> để broker chuyển message từ web về ESP32
-            mqttClient.subscribe(subscribe_topic);
-
-            Serial.print("Subscribed: ");
-            Serial.println(subscribe_topic);
-        }
-        else
-        {
-            Serial.print("\nFailed, rc=");
-            Serial.println(mqttClient.state());
-        }
+        Serial.print("[MQTT] Subscribed: ");
+        Serial.println(subscribe_topic);
+    }
+    else
+    {
+        Serial.print("[MQTT] Connect failed, rc=");
+        Serial.println(mqttClient.state());
     }
 }
 
-void publishData()
+void publishData(const SensorData &data)
 {
     JsonDocument doc; // Tạo JSON document.
 
-    doc["T"] = T;
-    doc["H"] = H;
-    doc["SM1"] = SM1;
-    doc["SM2"] = SM2;
+    doc["T"] = data.temperature;
+    doc["H"] = data.humidity;
+    doc["SM1"] = data.soil1;
+    doc["SM2"] = data.soil2;
 
     char payload[200];
 
@@ -348,23 +372,12 @@ void publishData()
 
     bool result = mqttClient.publish(publish_topic, payload);
 
-    Serial.println();
-
-    Serial.print("MQTT Publish: ");
+    Serial.print("\nMQTT Publish: ");
     Serial.print(payload);
-
     Serial.print(" | Topic: ");
     Serial.println(publish_topic);
-
     Serial.print("Publish status: ");
-    if (result)
-    {
-        Serial.println("SUCCESS");
-    }
-    else
-    {
-        Serial.println("FAILED");
-    }
+    Serial.println(result ? "SUCCESS" : "FAILED");
 }
 
 void sendRequest()
@@ -385,7 +398,6 @@ void sendRequest()
 
     Serial.print("\nE32 Wake-up mode: ");
     Serial.print(getResponseDescriptionByParams(s1));
-
     printAuxState();
 
     /* 2. SEND WAKE-UP REQ  */
@@ -401,8 +413,10 @@ void sendRequest()
 
     Serial.print("E32 Master -> NORMAL: ");
     Serial.print(getResponseDescriptionByParams(s2));
-
     printAuxState();
+
+    /* Cho E32 ổn định hoàn toàn ở RX NORMAL */
+    delay(20);
 
     /* Sau khi TX REQ, MASTER chỉ được chờ DATA */
     loraState = WAIT_DATA;
@@ -416,7 +430,6 @@ void transmitPendingCommandFrame()
 
     Serial.print("\nE32 Wake-up mode: ");
     Serial.print(getResponseDescriptionByParams(s1));
-
     printAuxState();
 
     /* Send command frame */
@@ -436,8 +449,10 @@ void transmitPendingCommandFrame()
 
     Serial.print("E32 Master -> NORMAL: ");
     Serial.print(getResponseDescriptionByParams(s2));
-
     printAuxState();
+
+    /* Cho E32 ổn định hoàn toàn ở RX NORMAL */
+    delay(20);
 
     Serial.print("Waiting ACK SEQ: ");
     Serial.println(waitingSeq);
@@ -446,11 +461,8 @@ void transmitPendingCommandFrame()
     loraStateStartedAt = millis();
 }
 
-void sendPendingCommand()
+void sendPendingCommand(const LoRaCommand &cmd)
 {
-    if (!commandPending)
-        return;
-
     sequenceNumber++;
 
     if (sequenceNumber == 0)
@@ -461,8 +473,8 @@ void sendPendingCommand()
     waitingSeq = sequenceNumber;
 
     /* Ví dụ: pendingCommand: ZONE=1,IRR=ON => <CMD,SEQ=25,ZONE=1,IRR=ON> */
-    activeCommand = pendingCommand;
-    pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + "," + activeCommand + ">";
+    pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + "," + "ZONE=" + String(cmd.zone) + ",IRR=" + String(cmd.irr ? "ON" : "OFF") + ">";
+
     commandRetryCount = 0;
     transmitPendingCommandFrame();
 }
@@ -475,13 +487,7 @@ void handleAckFrame(const String &frame)
     {
         Serial.println("ACK MATCH -> COMMAND SUCCESS");
 
-        if (pendingCommand == activeCommand)
-        {
-            commandPending = false;
-            pendingCommand = "";
-        }
         pendingCommandFrame = "";
-        activeCommand = "";
         commandRetryCount = 0;
         loraState = LORA_IDLE;
     }
@@ -505,8 +511,20 @@ void handleReceivedData(const String &frame)
             return;
         }
 
-        /* Có data mới -> Cho phép publish */
-        dataUpdated = true;
+        SensorData data;
+        data.temperature = T;
+        data.humidity = H;
+        data.soil1 = SM1;
+        data.soil2 = SM2;
+
+        if (xQueueSend(sensorDataQueue, &data, 0) == pdPASS)
+        {
+            Serial.println("[QUEUE] Sensor data queued");
+        }
+        else
+        {
+            Serial.println("[ERROR] SensorDataQueue FULL");
+        }
 
         loraState = LORA_IDLE;
     }
@@ -558,16 +576,95 @@ void handleLoraTimeouts()
         else
         {
             Serial.println("\nCOMMAND FAILED -> MAX RETRIES REACHED");
-            if (pendingCommand == activeCommand)
-            {
-                commandPending = false;
-                pendingCommand = "";
-            }
+
             pendingCommandFrame = "";
-            activeCommand = "";
             commandRetryCount = 0;
+
             loraState = LORA_IDLE;
         }
+    }
+}
+
+void LoRaTask(void *pvParameters)
+{
+    Serial.println("[RTOS] LoRaTask started!");
+
+    LoRaCommand cmd;
+
+    for (;;)
+    {
+        /* LORA RECEIVE  */
+        if (e32ttl100.available() > 0)
+        {
+            ResponseContainer rc = e32ttl100.receiveMessage();
+
+            if (rc.data.length() > 0)
+            {
+                Serial.print("\nLoRa RX: ");
+                Serial.println(rc.data);
+
+                processLoRaFrame(rc.data);
+            }
+        }
+
+        /* TIMEOUT  */
+        handleLoraTimeouts();
+
+        /* MASTER SCHEDULER */
+        if (loraState == LORA_IDLE)
+        {
+            /* CMD ưu tiên hơn polling */
+            if (xQueueReceive(commandQueue, &cmd, 0) == pdPASS)
+            {
+                sendPendingCommand(cmd);
+            }
+
+            /* Không có CMD -> Polling sensor */
+            else if (millis() - lastRequest >= REQUEST_INTERVAL)
+            {
+                lastRequest = millis();
+                sendRequest();
+            }
+        }
+
+        /* Nhường CPU cho task khác 5ms */
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+}
+
+void MQTTTask(void *pvParameters)
+{
+    Serial.println("[RTOS] MQTTTask started");
+
+    SensorData data;
+
+    for (;;)
+    {
+        maintainWiFi();
+
+        /* Chỉ kết nối và duy trì MQTT khi WiFi Ready */
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            if (!mqttClient.connected())
+            {
+                reconnectMQTT();
+            }
+
+            if (mqttClient.connected())
+            {
+                /* Duy trì MQTT connection */
+                mqttClient.loop();
+
+                /* Có sensor data mới? */
+                if (xQueueReceive(sensorDataQueue, &data, 0) == pdPASS)
+                {
+                    /* MQTT PUBLISH */
+                    publishData(data);
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -580,9 +677,11 @@ void setup()
     Serial.println("LoRa Receiver Started");
 
     /* WiFi */
+    WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
     lastWiFiReconnectAttempt = millis();
-    Serial.println("Connecting to Wi-Fi in background...");
+    wifiConnected = false;
+    Serial.println("[WIFI] Connecting in background...");
 
     /* MQTT */
     secureClient.setInsecure();                   // Bỏ kiểm tra CA, TLS vẫn mã hóa
@@ -591,67 +690,44 @@ void setup()
 
     randomSeed(millis());
 
-    //Serial.println("ESP32 MQTT Broker Ready!");
+    /* Create Queues */
+    commandQueue = xQueueCreate(5, sizeof(LoRaCommand));
+    sensorDataQueue = xQueueCreate(5, sizeof(SensorData));
+
+    if (commandQueue == NULL || sensorDataQueue == NULL)
+    {
+        Serial.println("[ERROR] Queue creation failed");
+
+        while (1)
+        {
+            delay(1000);
+        }
+    }
+
+    Serial.println("[RTOS] Queues created!");
+
+    /* Create RTOS Tasks */
+    xTaskCreate(
+        LoRaTask,   // Task function
+        "LoRaTask", // Task name
+        4096,       // Stack size (bytes)
+        NULL,       // Task parameters
+        2,          // Task priority
+        NULL);      // Task handle
+
+    xTaskCreate(
+        MQTTTask,
+        "MQTTTask",
+        4096,
+        NULL,
+        1,
+        NULL);
+
+    Serial.println("[RTOS] Tasks created!");
 }
 
 void loop()
 {
-    maintainWiFi();
-
-    /* Chỉ kết nối và duy trì MQTT khi WiFi Ready */
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        if (!mqttClient.connected())
-        {
-            reconnectMQTT();
-        }
- 
-        mqttClient.loop(); // Duy trì kết nối MQTT.
-    }
-    else if (mqttClient.connected())
-    {
-        mqttClient.disconnect();
-    }
-
-    // LORA RECEIVE
-    if (e32ttl100.available() > 0)
-    {
-        ResponseContainer rc = e32ttl100.receiveMessage();
-
-        if (rc.data.length() > 0)
-        {
-            Serial.println();
-            Serial.print("LoRa RX: ");
-            Serial.println(rc.data);
-
-            processLoRaFrame(rc.data);
-        }
-    }
-
-    handleLoraTimeouts();
-
-    // LORA MASTER SCHEDULER
-    if (loraState == LORA_IDLE)
-    {
-        /* CMD ưu tiên hơn việc polling sensor */
-        if (commandPending)
-        {
-            sendPendingCommand();
-        }
-
-        /* Không có CMD -> Poll sensor mỗi 60 giây */
-        else if (millis() - lastRequest >= REQUEST_INTERVAL)
-        {
-            lastRequest = millis();
-            sendRequest();
-        }
-    }
-
-    // MQTT PUBLISH
-    if (dataUpdated && millis() - lastMsg >= MQTT_PUBLISH_INTERVAL)      
-    {
-        lastMsg = millis();
-        publishData();
-        dataUpdated = false;
-    }
+    /* Arduino loopTask Block và nhường CPU 1s */
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }
