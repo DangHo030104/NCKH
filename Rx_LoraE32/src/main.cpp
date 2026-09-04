@@ -75,10 +75,10 @@ unsigned long lastMsg = 0;
 
 /* MASTER REQUEST (ESP32 -> STM32) */
 unsigned long lastRequest = 0;
-const unsigned long REQUEST_INTERVAL = 10000;
+const unsigned long REQUEST_INTERVAL = 5000;    // 5 phút = 300000 ms
 
-const unsigned long DATA_TIMEOUT_MS = 3000;    // Thời gian chờ DATA từ STM32 sau khi gửi REQ
-const unsigned long CMD_ACK_TIMEOUT_MS = 3000; // Thời gian chờ ACK từ STM32 sau khi gửi CMD
+const unsigned long DATA_TIMEOUT_MS = 5000;     // Thời gian chờ DATA từ STM32 sau khi gửi REQ
+const unsigned long CMD_ACK_TIMEOUT_MS = 5000;  // Thời gian chờ ACK từ STM32 sau khi gửi CMD
 
 const uint8_t MAX_CMD_RETRIES = 3;
 
@@ -490,6 +490,9 @@ void handleAckFrame(const String &frame)
         pendingCommandFrame = "";
         commandRetryCount = 0;
         loraState = LORA_IDLE;
+
+        /* Reset timer REQ -> Tránh gửi REQ ngay sau khi nhận ACK */
+        lastRequest = millis(); 
     }
     else
     {
@@ -627,8 +630,8 @@ void LoRaTask(void *pvParameters)
             }
         }
 
-        /* Nhường CPU cho task khác 5ms */
-        vTaskDelay(pdMS_TO_TICKS(5));
+        /* Nhường CPU cho task khác 1ms */
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
@@ -664,7 +667,7 @@ void MQTTTask(void *pvParameters)
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
 
