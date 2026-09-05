@@ -28,6 +28,9 @@
 #include "stdio.h"
 #include "DHT11.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -221,15 +224,15 @@ int main(void)
 
   /* Create the thread(s) */
   /* definition and creation of LoRaTask */
-  osThreadDef(LoRaTask, StartLoRaTask, osPriorityNormal, 0, 256);
+  osThreadDef(LoRaTask, StartLoRaTask, osPriorityNormal, 0, 512);
   LoRaTaskHandle = osThreadCreate(osThread(LoRaTask), NULL);
 
   /* definition and creation of SensorTask */
-  osThreadDef(SensorTask, StartSensorTask, osPriorityNormal, 0, 256);
+  osThreadDef(SensorTask, StartSensorTask, osPriorityNormal, 0, 512);
   SensorTaskHandle = osThreadCreate(osThread(SensorTask), NULL);
 
   /* definition and creation of ControlTask */
-  osThreadDef(ControlTask, StartControlTask, osPriorityNormal, 0, 128);
+  osThreadDef(ControlTask, StartControlTask, osPriorityNormal, 0, 256);
   ControlTaskHandle = osThreadCreate(osThread(ControlTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -727,7 +730,7 @@ static void send_Data(uint32_t seq, float t, float h, float sm1, float sm2)
         return;
     }
 
-    /* Cho ESP32 transmitter đủ thời gian chuyển WAKE-UP -> NORMAL RX */
+    /* Cho ESP32 transmitter đủ th�?i gian chuyển WAKE-UP -> NORMAL RX */
     osDelay(30);
 
     snprintf(tx_buff, sizeof(tx_buff), "<DATA,SEQ=%lu,T=%.2f,H=%.2f,SM1=%.2f,SM2=%.2f>", (unsigned long)seq, t, h, sm1, sm2);
@@ -832,6 +835,17 @@ static void Enter_Stop_Mode(void)
     /* Clear Power Wakeup Flag nếu còn */
     __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
 
+    /*
+     * Kiểm tra race condition:
+     * Nếu AUX đã LOW nghĩa là E32 đang có hoạt động,
+     * không được STOP Mode vì sẽ mất falling edge wake-up.
+     */
+    if (HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_RESET)
+    {
+        lora_wakeup_flag = 1;
+        return;
+    }
+
     /* 1. Stop HAL TICK: HAL Timebase hiện tại = TIM2 */
     HAL_SuspendTick();
 
@@ -840,6 +854,18 @@ static void Enter_Stop_Mode(void)
 
     /* Clear SysTick pending interrupt cũ */
     SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk;
+
+    /* Double check AUX -> Safe */
+    if (HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_RESET)
+    {
+        lora_wakeup_flag = 1;
+
+        /* Restore tick vì phía trên đã suspend */
+        HAL_ResumeTick();
+        SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
+
+        return;
+    }
 
     /* STOP MODE (WFI = Wait For Interrupt) */
     HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -905,7 +931,7 @@ static void Debug_Print(const char *msg)
 /* USER CODE END Header_StartLoRaTask */
 void StartLoRaTask(void const * argument)
 {
-	/* USER CODE BEGIN 5 */
+  /* USER CODE BEGIN 5 */
 
 	Debug_Print("[RTOS] LoRaTask started\r\n");
 
@@ -973,7 +999,7 @@ void StartLoRaTask(void const * argument)
 
     }
 
-    /* USER CODE END 5 */
+  /* USER CODE END 5 */
 }
 
 /* USER CODE BEGIN Header_StartSensorTask */
@@ -985,16 +1011,22 @@ void StartLoRaTask(void const * argument)
 /* USER CODE END Header_StartSensorTask */
 void StartSensorTask(void const * argument)
 {
-	/* USER CODE BEGIN StartSensorTask */
+  /* USER CODE BEGIN StartSensorTask */
 
 	Debug_Print("[RTOS] SensorTask started\r\n");
+
+	char dbg[80];
 
 	/* Infinite loop */
     for (;;)
     {
-        /* Ch�? LoRaTask yêu cầu đ�?c cảm biến.
+        /* Wait LoRaTask yêu cầu read cảm biến.
          * osWaitForever: SensorTask BLOCKED hoàn toàn khi không có yêu cầu */
+        Debug_Print("[SENSOR TASK] WAITING\r\n");
+
         osEvent event = osSignalWait(SENSOR_READ_SIGNAL, osWaitForever);
+
+        Debug_Print("[SENSOR TASK] WOKE UP\r\n");
 
         if (event.status == osEventSignal)
         {
@@ -1004,13 +1036,18 @@ void StartSensorTask(void const * argument)
 
             Debug_Print("[SENSOR TASK] Read complete\r\n");
 
+            UBaseType_t watermark = uxTaskGetStackHighWaterMark(NULL);	// Check mức stack thấp nhất còn lại của task.
+
+            snprintf(dbg, sizeof(dbg), "[SENSOR STACK] Min free = %lu words\r\n", (unsigned long)watermark);
+
+            Debug_Print(dbg);
 
             /* Báo cho LoRaTask: dữ liệu sensor đã sẵn sàng */
             osSignalSet(LoRaTaskHandle, SENSOR_READY_SIGNAL);
         }
     }
 
-    /* USER CODE END StartSensorTask */
+  /* USER CODE END StartSensorTask */
 }
 
 /* USER CODE BEGIN Header_StartControlTask */
@@ -1022,7 +1059,7 @@ void StartSensorTask(void const * argument)
 /* USER CODE END Header_StartControlTask */
 void StartControlTask(void const * argument)
 {
-	/* USER CODE BEGIN StartControlTask */
+  /* USER CODE BEGIN StartControlTask */
 
 	Debug_Print("[RTOS] ControlTask started\r\n");
 
@@ -1110,7 +1147,7 @@ void StartControlTask(void const * argument)
         }
     }
 
-    /* USER CODE END StartControlTask */
+  /* USER CODE END StartControlTask */
 }
 
 /**
