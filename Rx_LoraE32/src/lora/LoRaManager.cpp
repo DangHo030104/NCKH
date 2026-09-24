@@ -18,9 +18,6 @@ static LoRaState loraState = LORA_IDLE;
 /* LORA E32 */
 static LoRa_E32 e32ttl100(TX_PIN, RX_PIN, &Serial2, AUX_PIN, M0_PIN, M1_PIN, UART_BPS_RATE_9600, SERIAL_8N1);
 
-/* SENSOR DATA */
-static float T = 0, H = 0, SM1 = 0, SM2 = 0;
-
 /* MASTER REQUEST (ESP32 -> STM32) */
 static unsigned long lastRequest = 0;
 
@@ -52,37 +49,50 @@ static void printAuxState(void)
     }
 }
 
-/* Get value from frame */
-static bool getValue(const String &frame, const String &key, float &value)
+static bool parseDataFrame(const String &frame, SensorData &data)
 {
-    int pos = frame.indexOf(key); // Tìm vị trí đầu tiên của key trong frame
-    if (pos == -1)
+
+    if (!frame.startsWith("<D,") || !frame.endsWith(">"))
         return false;
 
-    pos += key.length(); // Di chuyển (pointer) đến sau key để lấy value
+    // LoRa frame: <D,seq,temp,hum,soil1,soil2,valve1,valve2,mode,battery> -> Remove <D, and > from the frame
+    String payload = frame.substring(3, frame.length() - 1);
 
-    int end = frame.indexOf(',', pos);
-    if (end == -1)
+    char buffer[128];
+
+    // Copy payload to buffer for tokenization
+    payload.toCharArray(buffer, sizeof(buffer));
+
+    char *token;
+
+    float value[9];
+
+    int index = 0;
+
+    // Tokenize the buffer using comma as the delimiter
+    token = strtok(buffer, ",");
+
+    while (token != NULL && index < 9)
     {
-        end = frame.indexOf('>', pos);
+        value[index++] = atof(token);
+
+        token = strtok(NULL, ",");
     }
 
-    if (end == -1)
-        return false; // Frame không hợp lệ
-
-    String valueText = frame.substring(pos, end);
-
-    if (valueText.length() == 0)
+    if (index != 9)
         return false;
 
-    char *parseEnd = nullptr;
-    const float parsedValue = strtof(valueText.c_str(), &parseEnd);
+    data.seq = value[0];
+    data.temperature = value[1];
+    data.humidity = value[2];
+    data.soil1 = value[3];
+    data.soil2 = value[4];
+    data.valve1 = value[5] ? VALVE_ON : VALVE_OFF;
+    data.valve2 = value[6] ? VALVE_ON : VALVE_OFF;
+    data.irrigationMode = value[7] ? MODE_AUTO : MODE_MANUAL;
+    data.batteryPercent = (uint8_t)value[8];
+    data.receivedAt = millis();
 
-    /* Kiểm tra xem chuỗi có được phân tích thành công không */
-    if (parseEnd == valueText.c_str() || *parseEnd != '\0' || !isfinite(parsedValue))
-        return false;
-
-    value = parsedValue;
     return true;
 }
 
@@ -109,31 +119,9 @@ static uint32_t getSeq(const String &frame)
     return frame.substring(pos, end).toInt();
 }
 
-static bool handleDataFrame(const String &frame)
+static bool handleDataFrame(const String &frame, SensorData &data)
 {
-    /* Kiểm tra frame bắt đầu bằng <DATA, và kết thúc bằng > */
-    if (!frame.startsWith("<DATA,") || !frame.endsWith(">"))
-        return false;
-
-    float newT = 0;
-    float newH = 0;
-    float newSM1 = 0;
-    float newSM2 = 0;
-
-    /* Parse vào biến tạm, chỉ cập nhật T/H/SM1/SM2 khi đủ cả 4 trường */
-    if (!getValue(frame, "T=", newT) || !getValue(frame, "H=", newH) ||
-        !getValue(frame, "SM1=", newSM1) || !getValue(frame, "SM2=", newSM2))
-    {
-        return false;
-    }
-
-    T = newT;
-    H = newH;
-    SM1 = newSM1;
-    SM2 = newSM2;
-
-    Serial.printf("\nTemperature: %.2f °C | Humidity: %.2f %% | SoilMoisture1: %.2f %% | SoilMoisture2: %.2f %%\n", T, H, SM1, SM2);
-    return true;
+    return parseDataFrame(frame, data);
 }
 
 static void sendRequest(void)
@@ -181,7 +169,6 @@ static void sendRequest(void)
 
 static void transmitPendingCommandFrame(void)
 {
-    setCommandDisplayState(COMMAND_DISPLAY_WAIT, commandRetryCount + 1);
     /* Wake-up transmitter */
     Status s1 = e32ttl100.setMode(MODE_1_WAKE_UP);
 
@@ -220,7 +207,6 @@ static void transmitPendingCommandFrame(void)
 
 static void sendPendingCommand(const LoRaCommand &cmd)
 {
-    setCommandDetails(cmd.zone, cmd.irr);
     sequenceNumber++;
 
     if (sequenceNumber == 0)
@@ -228,7 +214,7 @@ static void sendPendingCommand(const LoRaCommand &cmd)
         sequenceNumber = 1;
     }
 
-    waitingSeq = sequenceNumber;
+    waitingSeq = sequenceNumber;    // Ghi nhớ seq mà ACK phải chứa.
 
     /* Ví dụ: pendingCommand: ZONE=1,IRR=ON => <CMD,SEQ=25,ZONE=1,IRR=ON> */
     pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + "," + "ZONE=" + String(cmd.zone) + ",IRR=" + String(cmd.irr ? "ON" : "OFF") + ">";
@@ -244,7 +230,6 @@ static void handleAckFrame(const String &frame)
     if (loraState == WAIT_CMD_ACK && receivedSeq == waitingSeq)
     {
         Serial.println("ACK MATCH -> COMMAND SUCCESS");
-        setCommandDisplayState(COMMAND_DISPLAY_ACK, commandRetryCount + 1);
 
         pendingCommandFrame = "";
         commandRetryCount = 0;
@@ -261,59 +246,41 @@ static void handleAckFrame(const String &frame)
 
 static void handleReceivedData(const String &frame)
 {
-    uint32_t receivedSeq = getSeq(frame);
+    SensorData data = {};
 
-    if (loraState == WAIT_DATA && receivedSeq == waitingSeq)
+    if (!parseDataFrame(frame, data))
     {
-        Serial.println("DATA SEQ MATCH");
-
-        if (!handleDataFrame(frame))
-        {
-            Serial.println("INVALID DATA PAYLOAD -> IGNORED");
-            return;
-        }
-
-        SensorData data = {};
-        data.temperature = T;
-        data.humidity = H;
-        data.soil1 = SM1;
-        data.soil2 = SM2;
-        data.seq = receivedSeq;
-        data.receivedAt = millis();
-
-        /* Send data to MQTT queue */
-        if (xQueueSend(mqttDataQueue, &data, 0) == pdPASS)
-        {
-            Serial.println("[QUEUE] MQTT Queue OK");
-        }
-        else
-        {
-            Serial.println("[ERROR] MQTT Queue FULL");
-        }
-
-        /* Send data to Display queue */
-        if (xQueueSend(displayQueue, &data, 0) == pdPASS)
-        {
-            Serial.println("[QUEUE] Display Queue OK");
-        }
-        else
-        {
-            Serial.println("[ERROR] Display Queue FULL");
-        }
-
-        loraState = LORA_IDLE;
+        Serial.println("INVALID DATA PAYLOAD -> IGNORED");
+        return;
     }
-    else
+
+    Serial.println("DATA PARSE OK");
+
+    Serial.print("SEQ: ");
+    Serial.println(data.seq);
+
+    if(data.seq != waitingSeq)
     {
-        Serial.println("INVALID DATA -> IGNORED");
+        Serial.println("DATA SEQ INVALID");
+        return;
     }
+
+    Serial.println("DATA SEQ MATCH");
+
+    xQueueSend(mqttDataQueue, &data, 0);
+
+    xQueueSend(displayQueue, &data, 0);
+
+    Serial.println("[QUEUE] DATA SENT");
+
+    loraState = LORA_IDLE;
 }
 
 /* Phân loại frame LoRa nhận được */
 static void processLoRaFrame(const String &frame)
 {
     // DATA
-    if (frame.startsWith("<DATA"))
+    if (frame.startsWith("<D"))
     {
         handleReceivedData(frame);
         return;
@@ -351,8 +318,6 @@ static void handleLoraTimeouts(void)
         else
         {
             Serial.println("\nCOMMAND FAILED -> MAX RETRIES REACHED");
-
-            setCommandDisplayState(COMMAND_DISPLAY_FAIL, commandRetryCount + 1);
             pendingCommandFrame = "";
             commandRetryCount = 0;
 
@@ -360,7 +325,6 @@ static void handleLoraTimeouts(void)
         }
     }
 }
-
 
 void LoRaManager_Begin(QueueHandle_t commands, QueueHandle_t mqttData, QueueHandle_t displayData)
 {
@@ -379,7 +343,7 @@ void LoRaManager_Run(void *pvParameters)
     LoRaCommand cmd;
 
     // Gửi request đầu tiên ngay khi LoRaTask bắt đầu, thay vì chờ đủ 30 giây.
-    lastRequest = millis() - REQUEST_INTERVAL; 
+    lastRequest = millis() - REQUEST_INTERVAL;
 
     for (;;)
     {

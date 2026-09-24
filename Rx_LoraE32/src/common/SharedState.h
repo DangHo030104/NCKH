@@ -4,8 +4,6 @@
 #include "DataTypes.h"
 
 DashboardStatus readDashboardStatus(void);
-void setCommandDisplayState(CommandDisplayState state, uint8_t attempt);
-void setCommandDetails(uint8_t zone, bool irrigationOn);
 void setMqttDisplayState(bool online);
 void setWiFiDisplayState(bool online);
 

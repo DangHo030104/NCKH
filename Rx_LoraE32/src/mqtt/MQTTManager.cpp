@@ -135,7 +135,11 @@ static void publishData(const SensorData &data)
     doc["H"] = data.humidity;
     doc["SM1"] = data.soil1;
     doc["SM2"] = data.soil2;
-
+    doc["seq"] = data.seq;
+    doc["valve1"] = (data.valve1 == VALVE_ON) ? "ON" : "OFF";
+    doc["valve2"] = (data.valve2 == VALVE_ON) ? "ON" : "OFF";
+    doc["mode"] = (data.irrigationMode == MODE_AUTO) ? "AUTO" : "MANUAL";
+    
     char payload[200];
 
     serializeJson(doc, payload, sizeof(payload)); // Chuyển JSON thành chuỗi và ghi vào payload
@@ -150,7 +154,6 @@ static void publishData(const SensorData &data)
     Serial.println(result ? "SUCCESS" : "FAILED");
 }
 
-
 void MQTTManager_Begin(QueueHandle_t commands, QueueHandle_t mqttData)
 {
     commandQueue = commands;
@@ -159,7 +162,6 @@ void MQTTManager_Begin(QueueHandle_t commands, QueueHandle_t mqttData)
     secureClient.setInsecure();                   // Bỏ kiểm tra CA, TLS vẫn mã hóa
     mqttClient.setServer(mqtt_server, mqtt_port); // Cấu hình địa chỉ và cổng broker.
     mqttClient.setCallback(mqttCallback);         // Đăng ký hàm xử lý callback khi nhận message từ MQTT.
-
 }
 
 void MQTTManager_Run(void *pvParameters)

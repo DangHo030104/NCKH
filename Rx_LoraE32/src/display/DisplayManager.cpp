@@ -136,73 +136,86 @@ static void updateDisplay(const SensorData &data, bool hasData, uint32_t receive
 
     {
         drawSensorCard(4, 22, "TEMP", hasData ? data.temperature : NAN, true, 0xFD68);
-        drawSensorCard(82, 22, "HUM", hasData ? data.humidity : NAN, false, 0x4DDF);
+        drawSensorCard(82, 22, "HUMI", hasData ? data.humidity : NAN, false, 0x4DDF);
         drawSensorCard(4, 63, "SOIL 1", hasData ? data.soil1 : NAN, false, green);
         drawSensorCard(82, 63, "SOIL 2", hasData ? data.soil2 : NAN, false, green);
     }
 
     dashboardFrame.fillRect(0, 103, 160, 11, bg);
     dashboardFrame.setTextSize(1);
-    const uint16_t commandColor = status.command == COMMAND_DISPLAY_FAIL ? ST77XX_RED :
-        (status.command == COMMAND_DISPLAY_ACK ? green :
-        (status.command == COMMAND_DISPLAY_WAIT ? 0xFD68 : muted));
-    dashboardFrame.setTextColor(commandColor);
-    dashboardFrame.setCursor(5, 105);
-    if (status.command == COMMAND_DISPLAY_NONE)
-        dashboardFrame.print("CMD: --");
-    else
+    // One shared irrigation mode; show only fresh status reported by STM32.
+    const ValveState valves[] = {
+        hasData && !stale ? data.valve1 : VALVE_UNKNOWN,
+        hasData && !stale ? data.valve2 : VALVE_UNKNOWN};
+    const IrrigationMode mode = hasData && !stale ? data.irrigationMode : MODE_UNKNOWN;
+    for (int i = 0; i < 2; ++i)
     {
-        char commandText[26];
-        const char *state = status.command == COMMAND_DISPLAY_WAIT ? "WAIT" :
-            (status.command == COMMAND_DISPLAY_ACK ? "ACK" : "FAIL");
-        if (status.command == COMMAND_DISPLAY_WAIT)
-            snprintf(commandText, sizeof(commandText), "Z%u %s: %s %u/%u", status.zone,
-                     status.irrigationOn ? "ON" : "OFF", state, status.attempt, MAX_CMD_RETRIES);
-        else
-            snprintf(commandText, sizeof(commandText), "Z%u %s: %s", status.zone,
-                     status.irrigationOn ? "ON" : "OFF", state);
-        dashboardFrame.print(commandText);
+        dashboardFrame.setCursor(i == 0 ? 5 : 56, 105);
+        dashboardFrame.setTextColor(muted);
+        dashboardFrame.print(i == 0 ? "V1:" : "V2:");
+        dashboardFrame.setTextColor(valves[i] == VALVE_ON ? green : (valves[i] == VALVE_OFF ? muted : 0xFD68));
+        dashboardFrame.print(valves[i] == VALVE_ON ? "ON" : (valves[i] == VALVE_OFF ? "OFF" : "--"));
     }
-    
-    // MQTT shares the command row; reserve its right edge for icon and label.
-    const uint16_t mqttColor = status.mqttOnline && wifiOnline ? green : ST77XX_RED;
-    // 16 x 10 outline cloud: rounded crown, soft shoulders and a flat base.
-    static const uint8_t mqttCloudIcon[] PROGMEM = {
-        0x03, 0xC0,
-        0x04, 0x20,
-        0x08, 0x10,
-        0x38, 0x1C,
-        0x40, 0x02,
-        0x80, 0x01,
-        0x80, 0x01,
-        0x40, 0x02,
-        0x3F, 0xFC,
-        0x00, 0x00
-    };
-    dashboardFrame.drawBitmap(117, 104, mqttCloudIcon, 16, 10, mqttColor);
-    dashboardFrame.setTextColor(mqttColor);
-    dashboardFrame.setCursor(136, 105);
-    dashboardFrame.print("MQTT");
+    dashboardFrame.setCursor(119, 105);
+    dashboardFrame.setTextColor(mode == MODE_AUTO ? green : (mode == MODE_MANUAL ? 0x4DDF : 0xFD68));
+    dashboardFrame.print(mode == MODE_AUTO ? "AUTO" : (mode == MODE_MANUAL ? "MANUAL" : "--"));
     dashboardFrame.fillRect(0, 114, 160, 14, bg);
     dashboardFrame.fillCircle(7, 121, 2, radioColor);
     dashboardFrame.setTextSize(1);
     dashboardFrame.setTextColor(radioColor);
     dashboardFrame.setCursor(14, 118);
-    dashboardFrame.print(!hasData ? "WAITING FOR DATA" : (stale ? "OLD" : "LIVE"));
+    dashboardFrame.print(!hasData ? "WAIT" : (stale ? "OLD" : "LIVE"));
     if (hasData)
     {
         char text[24];
-        snprintf(text, sizeof(text), "Age Data:%lus", (unsigned long)(age / 1000));
+        if (age / 1000 > 9999)
+            snprintf(text, sizeof(text), ">9999s");
+        else
+            snprintf(text, sizeof(text), "%lus", (unsigned long)(age / 1000));
         dashboardFrame.setTextColor(muted);
-        dashboardFrame.setCursor(156 - strlen(text) * 6, 118);
+        dashboardFrame.setCursor(44, 118);
         dashboardFrame.print(text);
     }
+
+    // Pin thuộc về thiết bị (STM32) từ xa; ẩn mức pin (--%) khi dữ liệu đã cũ.
+    const bool batteryValid = hasData && !stale && data.batteryPercent <= 100;
+    const uint16_t batteryColor = !batteryValid ? muted : (data.batteryPercent <= 20 ? ST77XX_RED :           // Đỏ ≤ 20%
+                                                               (data.batteryPercent <= 50 ? 0xFD68 : green)); // Xanh > 50%, cam từ 21–50%
+    char batteryText[5] = "--%";
+    if (batteryValid)
+    {
+        snprintf(batteryText, sizeof(batteryText), "%u%%", (unsigned int)data.batteryPercent);
+    }
+
+    // Canh cả cụm pin theo mép phải màn hình: 3 px lề, 3 px giữa icon và chữ.
+    const int batteryTextX = 157 - strlen(batteryText) * 6;
+    const int batteryX = batteryTextX - 24;
+    const int batteryLabelX = batteryX - 17;
+    constexpr int batteryY = 116;
+    constexpr int batteryInnerWidth = 12;
+    dashboardFrame.setTextColor(muted);
+    dashboardFrame.setCursor(batteryLabelX, 118);
+    dashboardFrame.print("TX");
+    dashboardFrame.drawRect(batteryX, batteryY, 18, 11, batteryColor);
+    dashboardFrame.fillRect(batteryX + 18, batteryY + 3, 2, 5, batteryColor);
+    if (batteryValid && data.batteryPercent > 0)
+    {
+        // Làm tròn lên để mức pin thấp vẫn nhìn thấy được một cột màu.
+        const int levelWidth = (data.batteryPercent * batteryInnerWidth + 99) / 100;
+        dashboardFrame.fillRoundRect(batteryX + 3, batteryY + 3, levelWidth, 5, 1, batteryColor);
+    }
+    dashboardFrame.setTextColor(batteryColor);
+    dashboardFrame.setCursor(batteryTextX, 118);
+    dashboardFrame.print(batteryText);
+
     static bool initialized = false;
     static char previousClock[6] = "";
-    static uint16_t previousWifi = 0, previousRadio = 0, previousMqtt = 0;
-    static DashboardStatus previousStatus;
+    static uint16_t previousWifi = 0, previousRadio = 0;
+    static ValveState previousValves[2] = {VALVE_UNKNOWN, VALVE_UNKNOWN};
+    static IrrigationMode previousMode = MODE_UNKNOWN;
     static bool previousHasData = false;
     static uint32_t previousAgeSeconds = 0;
+    static uint8_t previousBatteryPercent = 0;
     static char previousValues[4][20] = {};
 
     if (!initialized || strcmp(previousClock, clockText) != 0)
@@ -225,27 +238,25 @@ static void updateDisplay(const SensorData &data, bool hasData, uint32_t receive
         strcpy(previousValues[i], valueText);
     }
 
-    if (!initialized || previousStatus.command != status.command ||
-        previousStatus.zone != status.zone || previousStatus.irrigationOn != status.irrigationOn ||
-        (status.command == COMMAND_DISPLAY_WAIT && previousStatus.attempt != status.attempt))
-        flushDashboardRegion(0, 103, 117, 11);
-    if (!initialized || previousMqtt != mqttColor)
-        flushDashboardRegion(117, 103, 43, 11);
+    if (!initialized || previousValves[0] != valves[0] ||
+        previousValves[1] != valves[1] || previousMode != mode)
+        flushDashboardRegion(0, 103, 160, 11);
     if (!initialized || previousHasData != hasData || previousRadio != radioColor ||
+        previousBatteryPercent != data.batteryPercent ||
         (hasData && previousAgeSeconds != age / 1000))
         flushDashboardRegion(0, 114, 160, 14);
 
     strcpy(previousClock, clockText);
     previousWifi = wifiColor;
     previousRadio = radioColor;
-    previousMqtt = mqttColor;
-    previousStatus = status;
+    previousValves[0] = valves[0];
+    previousValves[1] = valves[1];
+    previousMode = mode;
     previousHasData = hasData;
     previousAgeSeconds = age / 1000;
+    previousBatteryPercent = data.batteryPercent;
     initialized = true;
-
 }
-
 
 void DisplayManager_Begin(QueueHandle_t displayData)
 {
@@ -261,7 +272,6 @@ void DisplayManager_Begin(QueueHandle_t displayData)
     tft.setCursor(20, 20);
     tft.println("SMART FARM IoT");
     delay(1000);
-
 }
 
 void DisplayManager_Run(void *pvParameters)
@@ -271,27 +281,27 @@ void DisplayManager_Run(void *pvParameters)
     SensorData data = {};
     bool hasData = false;
     uint32_t receivedAt = 0;
+
     if (!dashboardFrame.getBuffer())
     {
         Serial.println("[DISPLAY] Framebuffer allocation failed");
         vTaskDelete(nullptr);
         return;
     }
+
     dashboardFrame.fillScreen(0x0862);
     tft.fillScreen(0x0862);
     updateDisplay(data, hasData, receivedAt);
 
     for (;;)
     {
-
-        // Refresh connection and command status even when no sensor data arrives.
+        // Refresh connection status and data age even when no sensor data arrives.
         if (xQueueReceive(displayQueue, &data, pdMS_TO_TICKS(200)) == pdPASS)
         {
             Serial.println("[DISPLAY] Update TFT");
 
             hasData = true;
             receivedAt = data.receivedAt;
-
         }
         updateDisplay(data, hasData, receivedAt);
 

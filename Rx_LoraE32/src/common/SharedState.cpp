@@ -14,26 +14,10 @@ DashboardStatus readDashboardStatus(void)
     return snapshot;
 }
 
-void setCommandDisplayState(CommandDisplayState state, uint8_t attempt)
-{
-    portENTER_CRITICAL(&dashboardMux);
-    dashboardStatus.command = state;
-    dashboardStatus.attempt = attempt;
-    portEXIT_CRITICAL(&dashboardMux);
-}
-
 void setMqttDisplayState(bool online)
 {
     portENTER_CRITICAL(&dashboardMux);
     dashboardStatus.mqttOnline = online;
-    portEXIT_CRITICAL(&dashboardMux);
-}
-
-void setCommandDetails(uint8_t zone, bool irrigationOn)
-{
-    portENTER_CRITICAL(&dashboardMux);
-    dashboardStatus.zone = zone;
-    dashboardStatus.irrigationOn = irrigationOn;
     portEXIT_CRITICAL(&dashboardMux);
 }
 

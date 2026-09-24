@@ -40,7 +40,7 @@ static const char *publish_topic = "iot/sensor/data/301b5eb855b7485bb15e";
 static const char *subscribe_topic = "iot/device/control/301b5eb855b7485bb15e";
 
 
-const unsigned long REQUEST_INTERVAL = 30000;  // 30s
+const unsigned long REQUEST_INTERVAL = 1000;  // 30s
 const unsigned long DATA_TIMEOUT_MS = 5000;    // Time Wait DATA STM32 sau khi gửi REQ
 const unsigned long CMD_ACK_TIMEOUT_MS = 5000; // Time Wait ACK STM32 sau khi gửi CMD
 // Allow two polling periods and a response window before marking data stale.
@@ -48,6 +48,5 @@ const unsigned long SENSOR_STALE_TIMEOUT_MS = 2 * REQUEST_INTERVAL + DATA_TIMEOU
 const uint8_t MAX_CMD_RETRIES = 3;
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
 const unsigned long WIFI_RECONNECT_INTERVAL = 5000;
-//const unsigned long MQTT_PUBLISH_INTERVAL = 2000;
 
 #endif // RX_LORAE32_CONFIG_APPCONFIG_H

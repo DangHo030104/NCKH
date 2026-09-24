@@ -12,38 +12,44 @@ typedef struct
     bool irr;
 } LoRaCommand;
 
+typedef enum
+{
+    VALVE_OFF,
+    VALVE_ON,
+    VALVE_UNKNOWN
+} ValveState;
+
+typedef enum
+{
+    MODE_MANUAL,
+    MODE_AUTO,
+    MODE_UNKNOWN
+} IrrigationMode;
+
 typedef struct
 {
     float temperature;
     float humidity;
+
     float soil1;
     float soil2;
 
     uint32_t seq;
     uint32_t receivedAt;
 
-    // bool loraConnected;
-    // bool mqttConnected;
-    // bool wifiConnected;
+    // Reported by STM32 in DATA, never inferred from a command ACK.
+    ValveState valve1;
+    ValveState valve2;
+    
+    IrrigationMode irrigationMode;
 
+    uint8_t batteryPercent;
 } SensorData;
-
-typedef enum
-{
-    COMMAND_DISPLAY_NONE,
-    COMMAND_DISPLAY_WAIT,
-    COMMAND_DISPLAY_ACK,
-    COMMAND_DISPLAY_FAIL
-} CommandDisplayState;
 
 typedef struct
 {
     bool mqttOnline;
     bool wifiOnline;
-    uint8_t zone;
-    bool irrigationOn;
-    uint8_t attempt;
-    CommandDisplayState command;
 } DashboardStatus;
 
 #endif // RX_LORAE32_COMMON_DATATYPES_H
