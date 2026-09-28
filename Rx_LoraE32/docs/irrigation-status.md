@@ -22,6 +22,23 @@ STM32 firmware must populate these fields from its current state. This receiver
 change does not implement automatic irrigation or change the transmitter.
 Relay output state is not proof of physical valve movement or water flow.
 
+## MQTT control commands
+
+The ESP32 accepts both relay and irrigation-mode commands on the configured
+control topic:
+
+```json
+{"relay":1,"state":"ON"}
+{"relay":2,"state":"OFF"}
+{"mode":"AUTO"}
+{"mode":"MANUAL"}
+```
+
+Mode messages are converted to `<CMD,SEQ=x,MODE=AUTO>` or
+`<CMD,SEQ=x,MODE=MANUAL>`. They use the same ACK timeout, retry, and sequence
+matching flow as relay commands. The displayed mode changes only after the
+next DATA frame reports the STM32's current state.
+
 Hardware checks: send AUTO and MANUAL reports, change each valve independently,
 send a legacy DATA response, and stop DATA until the stale timeout. Verify the
 row updates without flashing and MANUAL fits at the right edge of the TFT.

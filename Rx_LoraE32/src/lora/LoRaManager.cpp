@@ -214,10 +214,21 @@ static void sendPendingCommand(const LoRaCommand &cmd)
         sequenceNumber = 1;
     }
 
-    waitingSeq = sequenceNumber;    // Ghi nhớ seq mà ACK phải chứa.
+    waitingSeq = sequenceNumber; // Ghi nhớ seq mà ACK phải chứa.
 
     /* Ví dụ: pendingCommand: ZONE=1,IRR=ON => <CMD,SEQ=25,ZONE=1,IRR=ON> */
-    pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + "," + "ZONE=" + String(cmd.zone) + ",IRR=" + String(cmd.irr ? "ON" : "OFF") + ">";
+    if (cmd.type == COMMAND_MODE)
+    {
+        /* STM32 accepts: <CMD,SEQ=x,MODE=AUTO|MANUAL> */
+        pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + ",MODE=" +
+                              String(cmd.mode == MODE_AUTO ? "AUTO" : "MANUAL") + ">";
+    }
+    else
+    {
+        /* STM32 accepts: <CMD,SEQ=x,ZONE=1|2,IRR=ON|OFF> */
+        pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + ",ZONE=" +
+                              String(cmd.zone) + ",IRR=" + String(cmd.irr ? "ON" : "OFF") + ">";
+    }
 
     commandRetryCount = 0;
     transmitPendingCommandFrame();
@@ -259,7 +270,7 @@ static void handleReceivedData(const String &frame)
     Serial.print("SEQ: ");
     Serial.println(data.seq);
 
-    if(data.seq != waitingSeq)
+    if (data.seq != waitingSeq)
     {
         Serial.println("DATA SEQ INVALID");
         return;

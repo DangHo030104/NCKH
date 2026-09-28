@@ -6,12 +6,6 @@
 
 /* Private typedef -----------------------------------------------------------*/
 
-typedef struct
-{
-    uint8_t zone;
-    bool irr;
-} LoRaCommand;
-
 typedef enum
 {
     VALVE_OFF,
@@ -25,6 +19,20 @@ typedef enum
     MODE_AUTO,
     MODE_UNKNOWN
 } IrrigationMode;
+
+typedef enum
+{
+    COMMAND_IRRIGATION,
+    COMMAND_MODE
+} LoRaCommandType;
+
+typedef struct
+{
+    LoRaCommandType type;
+    uint8_t zone;
+    bool irr;
+    IrrigationMode mode;
+} LoRaCommand;
 
 typedef struct
 {

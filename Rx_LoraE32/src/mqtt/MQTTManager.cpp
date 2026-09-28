@@ -46,11 +46,47 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
         return;
     }
 
+    /* MODE command: {"mode":"AUTO"} or {"mode":"MANUAL"} */
+    const char *mode = doc["mode"];     // Lấy trường mode (AUTO hoặc MANUAL)
+
+    if (mode != nullptr)
+    {
+        LoRaCommand modeCommand = {};
+        modeCommand.type = COMMAND_MODE;
+
+        if (strcmp(mode, "AUTO") == 0)
+        {
+            modeCommand.mode = MODE_AUTO;
+        }
+        else if (strcmp(mode, "MANUAL") == 0)
+        {
+            modeCommand.mode = MODE_MANUAL;
+        }
+        else
+        {
+            Serial.print("[ERROR] Invalid mode: ");
+            Serial.println(mode);
+            return;
+        }
+
+        if (xQueueSend(commandQueue, &modeCommand, 0) == pdPASS)
+        {
+            Serial.print("[MQTT] CMD queued: MODE=");
+            Serial.println(mode);
+        }
+        else
+        {
+            Serial.println("[ERROR] CommandQueue FULL");
+        }
+
+        return;
+    }
+
     /* GET RELAY + STATE */
     int relay = doc["relay"] | 0;     // Lấy trường relay (1 hoặc 2)
     const char *state = doc["state"]; // Lấy trường state (ON/OFF)
 
-    if (relay == 0 || state == nullptr)
+    if ((relay != 1 && relay != 2) || state == nullptr)
     {
         Serial.println("Invalid MQTT command");
         return;
@@ -58,6 +94,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
 
     /* CREATE LORA COMMAND */
     LoRaCommand cmd = {};
+    cmd.type = COMMAND_IRRIGATION;
     cmd.zone = relay;
 
     if (strcmp(state, "ON") == 0)
