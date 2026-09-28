@@ -70,43 +70,37 @@ typedef enum
     RELAY_OWNER_AUTO
 }RelayOwner;
 
-typedef enum
-{
-    SENSOR_REQUEST_LORA = 1,
-    SENSOR_REQUEST_IRRIGATION = 2
-} SensorRequestType;
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define DHT11_PORT 		GPIOB
-#define DHT11_PIN  		GPIO_PIN_14
+#define DHT11_PORT 			GPIOB
+#define DHT11_PIN  			GPIO_PIN_14
 
-#define RELAY1_PORT 	GPIOA
-#define RELAY1_PIN  	GPIO_PIN_5 	// Van Zone 1
+#define RELAY1_PORT 		GPIOA
+#define RELAY1_PIN  		GPIO_PIN_5 		// Van Zone 1
 
-#define RELAY2_PORT 	GPIOA
-#define RELAY2_PIN  	GPIO_PIN_6 	// Van Zone 2
+#define RELAY2_PORT 		GPIOA
+#define RELAY2_PIN  		GPIO_PIN_6 		// Van Zone 2
 
-#define RELAY3_PORT 	GPIOA
-#define RELAY3_PIN  	GPIO_PIN_7 	// Pump
+#define RELAY3_PORT 		GPIOA
+#define RELAY3_PIN  		GPIO_PIN_7 		// Pump
 
-#define LED_PORT 		GPIOC
-#define LED_PIN  		GPIO_PIN_13    	// Test Debug
+#define LED_PORT 			GPIOC
+#define LED_PIN  			GPIO_PIN_13    	// Test Debug
 
-#define RELAY_ON   		GPIO_PIN_SET
-#define RELAY_OFF  		GPIO_PIN_RESET
+#define RELAY_ON   			GPIO_PIN_SET
+#define RELAY_OFF  			GPIO_PIN_RESET
 
-#define LORA_AUX_PORT 	GPIOA
-#define LORA_AUX_PIN  	GPIO_PIN_15
+#define LORA_AUX_PORT 		GPIOA
+#define LORA_AUX_PIN  		GPIO_PIN_15
 
-#define LORA_M0_PORT 	GPIOA
-#define LORA_M0_PIN  	GPIO_PIN_11
+#define LORA_M0_PORT 		GPIOA
+#define LORA_M0_PIN  		GPIO_PIN_11
 
-#define LORA_M1_PORT 	GPIOA
-#define LORA_M1_PIN  	GPIO_PIN_12
+#define LORA_M1_PORT 		GPIOA
+#define LORA_M1_PIN  		GPIO_PIN_12
 
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_4   // PA4
 
@@ -115,7 +109,10 @@ typedef enum
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-#define FRAME_TIMEOUT_MS		1000
+#define FRAME_TIMEOUT_MS			1000
+#define CMD_DUPLICATE_MS 			30000U  	// ESP32 retry window: avoid executing the same CMD twice
+#define MANUAL_WATER_TIMEOUT_MS 	60000U  	// Safety: auto-stop manual watering after 60 s
+#define AUTO_SENSOR_INTERVAL_MS    	60000U   	// AUTO đo lại sensor mỗi 60 giây
 
 /* Mỗi signal dùng một bit riêng */
 #define SENSOR_READ_SIGNAL     	0x01		// 0x01 → LoRaTask yêu cầu SensorTask read sensors
@@ -128,19 +125,26 @@ typedef enum
 #define IRRIGATION_READ_SIGNAL  0x20
 #define IRRIGATION_READY_SIGNAL 0x40
 
-/* Logic: SM < 35% → cần tưới | SM >= 55% → đủ nước
+/* (Kham khảo) Giá trị tạm thời, sẽ đo lại thực tế ở 2 khu đất */
+#define SOIL1_ADC_DRY   3000
+#define SOIL1_ADC_WET   1500
+
+#define SOIL2_ADC_DRY   3000
+#define SOIL2_ADC_WET   1500
+
+/* (Kham khảo) Logic: SM < 35% → cần tưới | SM >= 55% → đủ nước
  * Khoảng: 35% → 55% là vùng hysteresis để tránh không ON/OFF Relay liên tục quanh 1 mức */
 #define SOIL_START_THRESHOLD    35.0f
 #define SOIL_STOP_THRESHOLD     55.0f
 
-/* Tưới theo xung:
+/* (Kham khảo) Tưới theo xung:
  * Tưới      : 30 giây
  * Nghỉ thấm : 60 giây
  * Tối đa    : 3 phút */
-#define WATER_PULSE_MS      2000
-#define SOAK_TIME_MS       10000
-#define MAX_ZONE_TIME_MS   10000
-#define MAX_IRRIGATION_CYCLE 5
+#define WATER_PULSE_MS      	2000
+#define SOAK_TIME_MS       		10000
+#define MAX_ZONE_TIME_MS   		10000
+#define MAX_IRRIGATION_CYCLE 	5
 
 /* USER CODE END PM */
 
@@ -161,13 +165,14 @@ osThreadId IrrigationTaskHandle;
 DHT11_DataTypedef DHT11;
 
 volatile uint16_t temp = 0, humi = 0;
-volatile float sm1 = 0, sm2 = 0;  		// Soil Moisture
+uint16_t soil1_adc, soil2_adc, adc_val;			// ADC default: 12 bit
+volatile float sm1 = 0, sm2 = 0;  				// Soil Moisture
+volatile uint8_t sensor_data_valid = 0;
+volatile uint32_t last_sensor_update_tick = 0;	// Thời điểm gần nhất SensorTask đọc sensor thành công
 
 /* Battery */
 volatile float battery_voltage = 0.0f;
 volatile uint8_t battery_percent = 0;
-
-uint16_t adc_val;        		// ADC default: 12 bit
 
 uint32_t last_readSoil = 0;
 uint32_t last_readDHT = 0;
@@ -175,18 +180,27 @@ uint32_t last_cmd_time = 0;
 
 char tx_buff[128];
 char ack_buff[128];
-char rx_buff[128];
+char rx_ISR_buffer[128];
+char rx_frame_buffer[128];
 uint8_t rx_data;
 
 volatile uint8_t idx = 0;
 volatile uint8_t frame_receive = 0;
 volatile uint8_t frame_ready = 0;
 
+/* Đếm frame bị bỏ nếu frame cũ chưa xử lý xong */
+volatile uint32_t rx_frame_drop_count = 0;
+
 uint32_t wakeStart = 0;
 volatile uint8_t lora_wakeup_flag = 0;
 
 char control_command[64];
-uint32_t control_seq = 0;
+
+/* Duplicate CMD protection: remember the last successfully executed command. */
+uint32_t last_cmd_seq = 0;
+uint32_t last_cmd_tick = 0;
+uint8_t last_cmd_valid = 0;
+char last_cmd[64] = {0};
 
 char dbg[80];
 
@@ -194,16 +208,14 @@ volatile IrrigationMode irr_mode = MODE_MANUAL;
 volatile ValveState valve1_state = VALVE_OFF;
 volatile ValveState valve2_state = VALVE_OFF;
 volatile IrrigationState irr_state = IRR_IDLE;
+volatile RelayOwner relay_owner = RELAY_OWNER_NONE;
 
 uint32_t irr_state_start = 0;
 uint32_t zone1_total_water_time = 0;
 uint32_t zone2_total_water_time = 0;
 volatile uint8_t irr_measure_request = 0;
 volatile uint8_t irr_measure_pending = 0;
-uint8_t zone1_cycle = 0;
-uint8_t zone2_cycle = 0;
-
-volatile RelayOwner relay_owner = RELAY_OWNER_NONE;
+uint8_t zone1_cycle = 0, zone2_cycle = 0;
 
 /* USER CODE END PV */
 
@@ -223,8 +235,8 @@ void StartIrrigationTask(void const * argument);
 
 static void StartZone1(void);
 static void StartZone2(void);
-static void StopCurrentZone(RelayOwner owner);
 static void StopAllIrrigation(void);
+static void StopCurrentZone(RelayOwner owner);
 static void Irrigation_AutoUpdate(void);
 
 static void Process_Frame(char *frame);
@@ -236,6 +248,7 @@ static void send_Data(uint32_t seq);
 static void send_ACK(uint32_t seq);
 
 static uint16_t read_ADC(uint32_t channel);
+static float Soil_ADC_ToPercent(uint16_t adc, uint16_t adc_dry, uint16_t adc_wet);
 static void read_Sensors(void);
 static void read_Battery(void);
 
@@ -248,9 +261,9 @@ static void LoRa_SetPowerSavingMode(void);
 
 static void Debug_Print(const char *msg);
 
-static void Irrigation_RequestMeasure(void);
-static void Relay_RequestManual(void);
-static void Relay_RequestAuto(void);
+static void Irrigation_Measure(void);
+static void Relay_Manual(void);
+static void Relay_Auto(void);
 static void Relay_Release(void);
 
 /* USER CODE END PFP */
@@ -288,6 +301,13 @@ int main(void)
   MX_USART1_UART_Init();
   MX_ADC1_Init();
   MX_USART2_UART_Init();
+
+  /* Hiệu chuẩn ADC1 để tăng độ chính xác */
+  if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
   /* USER CODE BEGIN 2 */
 
   DHT11_Init(&DHT11, &htim1, DHT11_PORT, DHT11_PIN);
@@ -350,11 +370,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	  HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, RELAY_ON);
-//	  HAL_Delay(2000);
-//
-//	  HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, RELAY_OFF);
-//	  HAL_Delay(1000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -644,20 +659,33 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         {
             frame_receive = 1;
             idx = 0;
-            memset(rx_buff, 0, sizeof(rx_buff));
-            rx_buff[idx++] = c;
+            memset(rx_ISR_buffer, 0, sizeof(rx_ISR_buffer));
+            rx_ISR_buffer[idx++] = c;
         }
         else if (frame_receive)
         {
-        	if (idx < sizeof(rx_buff) - 1)
+        	if (idx < sizeof(rx_ISR_buffer) - 1)
             {
-            	rx_buff[idx++] = c;
+        		rx_ISR_buffer[idx++] = c;
 
                 if (c == '>')
                 {
-                    rx_buff[idx] = '\0';
+                	rx_ISR_buffer[idx] = '\0';
                     frame_receive = 0;
-                    frame_ready = 1;
+
+                    /* Chỉ publish frame mới khi LoRaTask đã xử lý frame trước */
+                    if (frame_ready == 0)
+                    {
+                        memcpy(rx_frame_buffer, rx_ISR_buffer, idx + 1);	// Chỉ copy đúng số byte đã nhận
+                        frame_ready = 1;
+                    }
+                    else
+                    {
+                        /* Frame cũ vẫn chưa xử lý -> Không overwrite rx_frame_buffer. */
+                        rx_frame_drop_count++;
+                    }
+
+                    idx = 0;
                 }
             }
             else
@@ -665,11 +693,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
                 /* Buffer full -> Reset */
                 idx = 0;
                 frame_receive = 0;
-                memset(rx_buff, 0, sizeof(rx_buff));
+                memset(rx_ISR_buffer, 0, sizeof(rx_ISR_buffer));
             }
         }
 
-        // Bật lại interrupt để tiếp tục nhận byte tiếp theo
+        // Bật lại UART ISR để tiếp tục nhận byte tiếp theo
         HAL_UART_Receive_IT(&huart1, &rx_data, 1);
     }
 }
@@ -716,16 +744,9 @@ static void StartZone2(void)
     HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, RELAY_ON);
 }
 
-static void StopCurrentZone(RelayOwner owner)
+static void StopAllIrrigation(void)
 {
-    if(owner != relay_owner)
-    {
-        Debug_Print("[RELAY] Stop rejected\r\n");
-        return;
-    }
-
-	Debug_Print("[IRR] Stop current zone\r\n");
-
+	Debug_Print("[IRR] Stop all irrigation\r\n");
     /* Pump OFF trước */
     HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, RELAY_OFF);
 
@@ -734,25 +755,57 @@ static void StopCurrentZone(RelayOwner owner)
     /* Sau đó đóng cả 2 van */
     HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, RELAY_OFF);
     HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, RELAY_OFF);
-}
 
-static void StopAllIrrigation(void)
-{
-	Debug_Print("[IRR] Stop all irrigation\r\n");
-    HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, RELAY_OFF);
-    HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, RELAY_OFF);
-    HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, RELAY_OFF);
-
+    /* Đồng bộ trạng thái phần mềm với trạng thái relay thực tế.
+     * Nếu không cập nhật hai biến này, DATA gửi lên ESP32/Web có thể vẫn báo van ON dù relay đã OFF */
     valve1_state = VALVE_OFF;
     valve2_state = VALVE_OFF;
+}
+
+static void StopCurrentZone(RelayOwner owner)
+{
+	/* Để tránh trường hợp AUTO can thiệp vào khi MANNUAL đang sở hữu Relay */
+    if(owner != relay_owner)
+    {
+        Debug_Print("[RELAY] Stop rejected\r\n");
+        return;
+    }
+
+	Debug_Print("[IRR] Stop current zone\r\n");
+	StopAllIrrigation();
 }
 
 static void Irrigation_AutoUpdate(void)
 {
     if(relay_owner == RELAY_OWNER_MANUAL) return;
 
-    /* Chỉ chạy khi AUTO */
     if (irr_mode != MODE_AUTO) return;
+
+    /* AUTO không được quyết định tưới khi chưa có dữ liệu sensor (STM32 reboot) */
+    if (!sensor_data_valid)
+    {
+        if (!irr_measure_pending)
+        {
+        	Debug_Print("[AUTO] Sensor data invalid -> request measurement\r\n");
+
+            Irrigation_Measure();
+        }
+
+        return;
+    }
+
+    /* AUTO IDLE: lấy dữ liệu sensor mới định kỳ */
+    if (irr_state == IRR_IDLE && !irr_measure_pending && (HAL_GetTick() - last_sensor_update_tick) >= AUTO_SENSOR_INTERVAL_MS)
+    {
+        Debug_Print("[AUTO] Periodic sensor measurement\r\n");
+
+        /* Không cho AUTO sử dụng dữ liệu cũ để quyết định tưới */
+        sensor_data_valid = 0;
+
+        Irrigation_Measure();
+
+        return;
+    }
 
     switch (irr_state)
     {
@@ -764,10 +817,18 @@ static void Irrigation_AutoUpdate(void)
             uint8_t zone1 = (sm1 < SOIL_START_THRESHOLD);
             uint8_t zone2 = (sm2 < SOIL_START_THRESHOLD);
 
-            /* Không Zone nào khô */
+            /* Không Zone nào khô -> Đủ ẩm */
             if (!zone1 && !zone2)
             {
-                StopAllIrrigation();
+                /* Nếu hệ thống thực sự đã OFF hoàn toàn thì không gọi lại StopAllIrrigation() để tránh block 300ms lặp liên tục */
+                if (relay_owner != RELAY_OWNER_NONE || valve1_state != VALVE_OFF || valve2_state != VALVE_OFF)
+                {
+                    Debug_Print("[AUTO] IDLE -> ensure irrigation OFF\r\n");
+
+                    StopAllIrrigation();
+                    Relay_Release();
+                }
+
                 return;
             }
 
@@ -776,7 +837,7 @@ static void Irrigation_AutoUpdate(void)
             {
                 Debug_Print("[AUTO] Select Zone1\r\n");
 
-                Relay_RequestAuto();
+                Relay_Auto();
 
                 irr_state = IRR_ZONE1_WATERING;
                 irr_state_start = HAL_GetTick();
@@ -786,13 +847,12 @@ static void Irrigation_AutoUpdate(void)
                 return;
             }
 
-
             /* Chỉ Zone2 khô */
             if (!zone1 && zone2)
             {
                 Debug_Print("[AUTO] Select Zone2\r\n");
 
-                Relay_RequestAuto();
+                Relay_Auto();
 
                 irr_state = IRR_ZONE2_WATERING;
                 irr_state_start = HAL_GetTick();
@@ -802,8 +862,7 @@ static void Irrigation_AutoUpdate(void)
                 return;
             }
 
-
-            /* Cả hai Zone đ�?u khô (cần tưới)
+            /* Cả hai Zone khô (cần tưới)
              * -> Zone khô hơn được ưu tiên */
             if (zone1 && zone2)
             {
@@ -811,7 +870,7 @@ static void Irrigation_AutoUpdate(void)
                 {
                     Debug_Print("[AUTO] Both dry -> Zone1 first\r\n");
 
-                    Relay_RequestAuto();
+                    Relay_Auto();
 
                     irr_state = IRR_ZONE1_WATERING;
                     irr_state_start = HAL_GetTick();
@@ -822,7 +881,7 @@ static void Irrigation_AutoUpdate(void)
                 {
                     Debug_Print("[AUTO] Both dry -> Zone2 first\r\n");
 
-                    Relay_RequestAuto();
+                    Relay_Auto();
 
                     irr_state = IRR_ZONE2_WATERING;
                     irr_state_start = HAL_GetTick();
@@ -858,9 +917,12 @@ static void Irrigation_AutoUpdate(void)
             {
                 Debug_Print("[AUTO] Zone1 soak complete\r\n");
 
-                irr_state = IRR_ZONE1_MEASURE;
+                Irrigation_Measure();
 
-                Irrigation_RequestMeasure();
+                if (irr_measure_pending)
+                {
+                    irr_state = IRR_ZONE1_MEASURE;
+                }
             }
 
             break;
@@ -868,7 +930,7 @@ static void Irrigation_AutoUpdate(void)
 
         case IRR_ZONE1_MEASURE:
         {
-            /* Ch�? SensorTask đ�?c xong */
+            /* Wait SensorTask read */
             if(irr_measure_pending == 0)
             {
                 if(sm1 >= SOIL_STOP_THRESHOLD)
@@ -876,7 +938,7 @@ static void Irrigation_AutoUpdate(void)
                     Debug_Print("[AUTO] Zone1 moisture OK\r\n");
 
                     zone1_cycle = 0;
-                    StopAllIrrigation();
+
                     Relay_Release();
                     irr_state = IRR_IDLE;
                 }
@@ -890,7 +952,6 @@ static void Irrigation_AutoUpdate(void)
                     {
                         Debug_Print("[ERROR] Zone1 irrigation failed\r\n");
 
-                        StopAllIrrigation();
                         Relay_Release();
                         zone1_cycle = 0;
                         irr_state = IRR_IDLE;
@@ -930,8 +991,12 @@ static void Irrigation_AutoUpdate(void)
             {
                 Debug_Print("[AUTO] Zone2 soak complete\r\n");
 
-                irr_state = IRR_ZONE2_MEASURE;
-                Irrigation_RequestMeasure();
+                Irrigation_Measure();
+
+                if (irr_measure_pending)
+                {
+                    irr_state = IRR_ZONE2_MEASURE;
+                }
             }
 
             break;
@@ -947,7 +1012,7 @@ static void Irrigation_AutoUpdate(void)
                     Debug_Print("[AUTO] Zone2 moisture OK\r\n");
 
                     zone2_cycle = 0;
-                    StopAllIrrigation();
+
                     Relay_Release();
                     irr_state = IRR_IDLE;
                 }
@@ -961,7 +1026,6 @@ static void Irrigation_AutoUpdate(void)
                     {
                         Debug_Print("[ERROR] Zone2 irrigation failed\r\n");
 
-                        StopAllIrrigation();
                         Relay_Release();
                         zone2_cycle = 0;
                         irr_state = IRR_IDLE;
@@ -982,7 +1046,14 @@ static void Irrigation_AutoUpdate(void)
 
         default:
         {
+            Debug_Print("[ERROR] Invalid irrigation state -> reset\r\n");
+
             StopAllIrrigation();
+            Relay_Release();
+
+            zone1_cycle = 0;
+            zone2_cycle = 0;
+
             irr_state = IRR_IDLE;
 
             break;
@@ -1059,7 +1130,7 @@ static void Process_Request(char *frame)
 
 static void Process_Command(char *cmd)
 {
-    unsigned long seq = 0;
+    uint32_t seq = 0;
 
     Debug_Print("[CMD] Parse frame: ");
     Debug_Print(cmd);
@@ -1082,12 +1153,23 @@ static void Process_Command(char *cmd)
 
     Debug_Print("[CMD] Valid\r\n");
 
-    /* 2. COPY COMMAND */
+    /* 2. DUPLICATE PROTECTION
+     * ESP32 retries the exact same frame with the same SEQ when ACK is lost.
+     * In that case, do NOT execute the relay/mode command again; only resend ACK.
+     * Lưu ý: kiểm tra cả SEQ lẫn nội dung command, chứ không chỉ kiểm tra SEQ.
+     * Cách này an toàn hơn trong trường hợp ESP32 reboot và sequence bắt đầu lại. */
+    if (last_cmd_valid && last_cmd_seq == seq && strcmp(last_cmd, cmd) == 0 && (HAL_GetTick() - last_cmd_tick) <= CMD_DUPLICATE_MS)
+    {
+        Debug_Print("[CMD] Duplicate -> ACK only\r\n");
+        send_ACK(seq);
+        return;
+    }
+
+    /* 3. COPY COMMAND */
     strncpy(control_command, cmd, sizeof(control_command) - 1);
     control_command[sizeof(control_command) - 1] = '\0';
-    control_seq = (uint32_t)seq;
 
-    /* 3. WAKE ControlTask */
+    /* 4. WAKE ControlTask */
     Debug_Print("[CMD] Request ControlTask\r\n");
 
     osStatus status = osSignalSet(ControlTaskHandle, CONTROL_EXEC_SIGNAL);
@@ -1099,8 +1181,8 @@ static void Process_Command(char *cmd)
     }
 
 
-    /* 4. WAIT CONTROL COMPLETE */
-    osEvent event = osSignalWait(CONTROL_OK_SIGNAL | CONTROL_ERROR_SIGNAL, 1000);
+    /* 5. WAIT CONTROL COMPLETE */
+    osEvent event = osSignalWait(CONTROL_OK_SIGNAL | CONTROL_ERROR_SIGNAL, 2000);
 
     if (event.status != osEventSignal)
     {
@@ -1112,7 +1194,16 @@ static void Process_Command(char *cmd)
     if (event.value.signals & CONTROL_OK_SIGNAL)
     {
         Debug_Print("[CMD] Control successful\r\n");
-        send_ACK((uint32_t)seq);
+
+        /* Store BEFORE sending ACK. If ACK is lost, ESP32 will retry the same
+         * CMD and STM32 can safely resend ACK without executing it twice. */
+        last_cmd_seq = seq;
+        last_cmd_tick = HAL_GetTick();
+        last_cmd_valid = 1;
+        strncpy(last_cmd, cmd, sizeof(last_cmd) - 1);
+        last_cmd[sizeof(last_cmd) - 1] = '\0';
+
+        send_ACK(seq);
     }
 
     /* Command không hợp lệ hoặc không thực thi được */
@@ -1133,6 +1224,8 @@ static uint8_t Wait_For_Frame(uint32_t timeout)
         {
             return 0;
         }
+
+        osDelay(1);	// Nhường CPU cho task khác 1ms
     }
 
     return 1;
@@ -1189,7 +1282,7 @@ static void send_ACK(uint32_t seq)
         return;
     }
 
-    snprintf(ack_buff, sizeof(ack_buff), "<ACK,SEQ=%lu>", (unsigned long)seq);
+    snprintf(ack_buff, sizeof(ack_buff), "<ACK,SEQ=%lu>", seq);
 
     Debug_Print("[LORA TX] ");
     Debug_Print(ack_buff);
@@ -1223,21 +1316,48 @@ static uint16_t read_ADC(uint32_t channel)
 	return adc_val;
 }
 
+static float Soil_ADC_ToPercent(uint16_t adc, uint16_t adc_dry, uint16_t adc_wet)
+{
+    float moisture;
+
+    /* TH phổ biến: DRY ADC > WET ADC */
+    moisture = ((float)adc_dry - (float)adc) * 100.0f / ((float)adc_dry - (float)adc_wet);
+
+    /* Đảm bảo giá trị độ ẩm nằm trong khoảng [0, 100]% */
+    if (moisture > 100.0f)
+        moisture = 100.0f;
+
+    if (moisture < 0.0f)
+        moisture = 0.0f;
+
+    return moisture;
+}
+
 static void read_Sensors(void)
 {
-    /* SOIL MOISTURE */
-    sm1 = 100 - ((read_ADC(ADC_CHANNEL_0) / 4095.0) * 100);
-    sm2 = 100 - ((read_ADC(ADC_CHANNEL_1) / 4095.0) * 100);
+    /* 1. SOIL MOISTURE */
 
-    /* DHT11 */
+    // Read ADC Raw
+    soil1_adc = read_ADC(ADC_CHANNEL_0);
+    soil2_adc = read_ADC(ADC_CHANNEL_1);
+
+    // Chuyển ADC -> % độ ẩm
+    sm1 = Soil_ADC_ToPercent(soil1_adc, SOIL1_ADC_DRY, SOIL1_ADC_WET);
+    sm2 = Soil_ADC_ToPercent(soil2_adc, SOIL2_ADC_DRY, SOIL2_ADC_WET);
+
+    /* 2. DHT11 */
     if (DHT11_Read_Data(&DHT11))
     {
         temp = DHT11.Temperature;
         humi = DHT11.Humidity;
     }
 
-    /* BATTERY */
+    /* 3. BATTERY */
     read_Battery();
+
+    /* Sensor data đã được cập nhật */
+    last_sensor_update_tick = HAL_GetTick();
+    sensor_data_valid = 1;
 }
 
 static void read_Battery(void)
@@ -1260,6 +1380,13 @@ static void read_Battery(void)
 
 static uint8_t Can_Enter_Stop_Mode(void)
 {
+    /* AUTO cần CPU hoạt động để tự kiểm tra sensor định kỳ.
+     * Sau này có thể thay bằng RTC wake-up để tiết kiệm năng lượng. */
+    if (irr_mode == MODE_AUTO)
+    {
+        return 0;
+    }
+
     /* Chỉ được STOP khi toàn bộ hệ thống đang IDLE */
 
     /* 1. AUTO irrigation đang chạy */
@@ -1274,7 +1401,7 @@ static uint8_t Can_Enter_Stop_Mode(void)
         return 0;
     }
 
-    /* 3. Irrigation đang ch�? SensorTask đo */
+    /* 3. Irrigation waiting SensorTask đo */
     if (irr_measure_pending)
     {
         return 0;
@@ -1286,7 +1413,7 @@ static uint8_t Can_Enter_Stop_Mode(void)
         return 0;
     }
 
-    /* 5. �?ã nhận frame nhưng LoRaTask chưa xử lý */
+    /* 5. Đã nhận frame nhưng LoRaTask chưa xử lý */
     if (frame_ready)
     {
         return 0;
@@ -1297,70 +1424,111 @@ static uint8_t Can_Enter_Stop_Mode(void)
 
 static void Enter_Stop_Mode(void)
 {
+    /*
+     * POWER-1:
+     * Không reset parser/buffer trước STOP.
+     * Khóa interrupt trong khoảng kiểm tra cuối -> vào STOP
+     * để UART ISR không thể publish frame rồi bị bỏ mất.
+     */
+
     lora_wakeup_flag = 0;
 
-    /* Reset parser để tránh còn frame cũ trước STOP */
-    idx = 0;
-    frame_receive = 0;
-    frame_ready = 0;
+    /* =========================================================
+     * 1. ATOMIC FINAL CHECK
+     * ========================================================= */
+    __disable_irq();
 
-    memset(rx_buff, 0, sizeof(rx_buff));
+    /*
+     * Nếu đã có frame, đang nhận frame,
+     * hoặc UART đã có byte chờ xử lý -> không được STOP.
+     */
+    if (frame_ready || frame_receive || __HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE))
+    {
+        __enable_irq();
+        return;
+    }
 
-    /* Restart UART RX Interrupt */
-    HAL_UART_AbortReceive(&huart1);
-    HAL_UART_Receive_IT(&huart1, &rx_data, 1);
-
-    /* Clear EXTI pending cũ để tránh vừa vào STOP đã wake */
-    __HAL_GPIO_EXTI_CLEAR_IT(LORA_AUX_PIN);
-
-    /* Clear NVIC pending của EXTI15 */
-    HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-
-    /* Clear Power Wakeup Flag nếu còn */
-    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
-
-    /* Kiểm tra race condition:
-     * Nếu AUX đã LOW nghĩa là E32 đang có hoạt động,
-     * không được STOP Mode vì sẽ mất falling edge wake-up.
+    /*
+     * AUX LOW = E32 đang có hoạt động.  Không được đi ngủ.
      */
     if (HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_RESET)
     {
         lora_wakeup_flag = 1;
+
+        __enable_irq();
         return;
     }
 
-    /* 1. Stop HAL TICK: HAL Timebase hiện tại = TIM2 */
-    HAL_SuspendTick();
+    /* =========================================================
+     * 2. CLEAR OLD WAKE FLAGS
+     * ========================================================= */
 
-    /* 2. STOP FreeRTOS SysTick */
-    SysTick->CTRL &= ~SysTick_CTRL_TICKINT_Msk;
+    __HAL_GPIO_EXTI_CLEAR_IT(LORA_AUX_PIN);
 
-    /* Clear SysTick pending interrupt cũ */
-    SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk;
+    HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
 
-    /* Double check AUX -> Safe */
+    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+
+    /*
+     * Sau khi clear pending, kiểm tra AUX lần cuối.
+     * Interrupt vẫn đang disable nên không có ISR chen ngang.
+     */
     if (HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_RESET)
     {
         lora_wakeup_flag = 1;
 
-        /* Restore tick vì phía trên đã suspend */
-        HAL_ResumeTick();
-        SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
-
+        __enable_irq();
         return;
     }
 
-    /* STOP MODE (WFI = Wait For Interrupt) */
+    /* =========================================================
+     * 3. PREPARE STOP
+     * ========================================================= */
+
+    HAL_SuspendTick();
+
+    /* Stop FreeRTOS SysTick interrupt */
+    SysTick->CTRL &= ~SysTick_CTRL_TICKINT_Msk;
+
+    /* Clear SysTick pending */
+    SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk;
+
+    /*
+     * Final safety check ngay trước WFI.
+     */
+    if (HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_RESET)
+    {
+        lora_wakeup_flag = 1;
+
+        HAL_ResumeTick();
+        SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
+
+        __enable_irq();
+        return;
+    }
+
+    /* =========================================================
+     * 4. ENTER STOP
+     * ========================================================= */
+
     HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 
-    /* STM32 wake -> Restore system clock */
+    /* =========================================================
+     * 5. WAKE-UP
+     * ========================================================= */
+
     SystemClock_Config();
 
-    /* 1. Cho HAL_GetTick() chạy lại */
     HAL_ResumeTick();
 
-    /* 2. RESTORE FreeRTOS SysTick */
     SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
+
+    /*
+     * Khi enable IRQ:
+     * EXTI AUX đang pending sẽ chạy callback và set
+     * lora_wakeup_flag = 1.
+     */
+    __enable_irq();
 }
 
 static uint8_t LoRa_WaitReady(uint32_t timeout)
@@ -1374,6 +1542,10 @@ static uint8_t LoRa_WaitReady(uint32_t timeout)
         {
             return 0;
         }
+
+        /* Nhường CPU cho các FreeRTOS task khác.
+         * Tránh busy-wait chiếm CPU liên tục khi E32 đang BUSY */
+        osDelay(1);
     }
 
     return 1;
@@ -1385,7 +1557,7 @@ static void LoRa_SetNormalMode(void)
     HAL_GPIO_WritePin(LORA_M1_PORT, LORA_M1_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LORA_M0_PORT, LORA_M0_PIN, GPIO_PIN_RESET);
 
-    HAL_Delay(5);
+    osDelay(5);
 
 }
 
@@ -1395,7 +1567,7 @@ static void LoRa_SetPowerSavingMode(void)
     HAL_GPIO_WritePin(LORA_M1_PORT, LORA_M1_PIN, GPIO_PIN_SET);
     HAL_GPIO_WritePin(LORA_M0_PORT, LORA_M0_PIN, GPIO_PIN_RESET);
 
-    HAL_Delay(5);
+    osDelay(5);
 }
 
 static void Debug_Print(const char *msg)
@@ -1403,16 +1575,24 @@ static void Debug_Print(const char *msg)
     HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), 100);
 }
 
-static void Irrigation_RequestMeasure(void)
+static void Irrigation_Measure(void)
 {
     Debug_Print("[AUTO] Request sensor measurement\r\n");
 
     irr_measure_pending = 1;
 
-    osSignalSet(SensorTaskHandle, IRRIGATION_READ_SIGNAL);
+    osStatus status = osSignalSet(SensorTaskHandle, IRRIGATION_READ_SIGNAL);
+
+    if (status < 0)
+    {
+        Debug_Print("[ERROR] Irrigation sensor signal failed\r\n");
+
+        /* Rollback trạng thái pending nếu gửi signal thất bại */
+        irr_measure_pending = 0;
+    }
 }
 
-static void Relay_RequestManual(void)
+static void Relay_Manual(void)
 {
 	StopAllIrrigation();
 
@@ -1423,14 +1603,13 @@ static void Relay_RequestManual(void)
     Debug_Print("[RELAY] Owner = MANUAL\r\n");
 }
 
-static void Relay_RequestAuto(void)
+static void Relay_Auto(void)
 {
     if(relay_owner == RELAY_OWNER_MANUAL) return;
 
     relay_owner = RELAY_OWNER_AUTO;
 
     Debug_Print("[RELAY] Owner = AUTO\r\n");
-
 }
 
 static void Relay_Release(void)
@@ -1458,10 +1637,30 @@ void StartLoRaTask(void const * argument)
 	/* Infinite loop */
     for (;;)
     {
+    	/* ============================================
+    	 * Ưu tiên xử lý frame nếu UART đã nhận đủ frame.
+    	 * Điều này cho phép LoRa hoạt động cả khi AUTO, không cho STM32 vào STOP mode.
+    	 * ============================================ */
+    	if (frame_ready)
+    	{
+    	    Debug_Print("[UART1] Frame received: ");
+    	    Debug_Print(rx_frame_buffer);
+    	    Debug_Print("\r\n");
+
+    	    Process_Frame(rx_frame_buffer);
+
+    	    /* Chỉ release buffer sau khi xử lý xong */
+    	    frame_ready = 0;
+
+    	    osDelay(1);
+    	    continue;
+    	}
+
         /* 1. CHECK SYSTEM IDLE */
 
         if (!Can_Enter_Stop_Mode())
         {
+        	osDelay(5);
             continue;
         }
 
@@ -1516,13 +1715,13 @@ void StartLoRaTask(void const * argument)
 	    }
 
 	    Debug_Print("[UART1] Frame received: ");
-	    Debug_Print(rx_buff);
+	    Debug_Print(rx_frame_buffer);
 	    Debug_Print("\r\n");
 
 	    /* 6. PROCESS REQ / CMD */
 
+	    Process_Frame(rx_frame_buffer);
 	    frame_ready = 0;
-	    Process_Frame(rx_buff);
 
         UBaseType_t watermark = uxTaskGetStackHighWaterMark(NULL);	// Check mức stack thấp nhất còn lại của task.
         snprintf(dbg, sizeof(dbg), "[LoRaTask STACK] Min free = %lu words\r\n", (unsigned long)watermark);
@@ -1562,27 +1761,31 @@ void StartSensorTask(void const * argument)
 
         if (event.status == osEventSignal)
         {
-            /* �?�?c sensor cho LoRa DATA */
-            if(event.value.signals & SENSOR_READ_SIGNAL)
+        	uint32_t signals = event.value.signals;
+
+            /* Nếu có ít nhất một yêu cầu đọc sensor, chỉ đọc toàn bộ sensor 1 lần */
+        	if (signals & (SENSOR_READ_SIGNAL | IRRIGATION_READ_SIGNAL))
             {
-            	Debug_Print("[SENSOR TASK] LoRa read request\r\n");
+            	Debug_Print("[SENSOR TASK] Read sensors\r\n");
 
                 read_Sensors();
 
+                Debug_Print("[SENSOR TASK] Sensor read complete\r\n");
+            }
+
+            /* Nếu LoRaTask yêu cầu dữ liệu */
+            if (signals & SENSOR_READ_SIGNAL)
+            {
                 Debug_Print("[SENSOR TASK] LoRa data ready\r\n");
 
                 /* Báo cho LoRaTask: dữ liệu sensor đã sẵn sàng */
                 osSignalSet(LoRaTaskHandle, SENSOR_READY_SIGNAL);
             }
 
-            /* �?�?c sensor cho AUTO irrigation */
-            if(event.value.signals & IRRIGATION_READ_SIGNAL)
+            /* Nếu AUTO irrigation yêu cầu dữ liệu */
+            if (signals & IRRIGATION_READ_SIGNAL)
             {
-            	Debug_Print("[SENSOR TASK] Irrigation read request\r\n");
-
-                read_Sensors();
-
-                Debug_Print("[SENSOR TASK] Irrigation data ready\r\n");
+            	Debug_Print("[SENSOR TASK] Irrigation data ready\r\n");
 
                 irr_measure_pending = 0;
 
@@ -1624,60 +1827,210 @@ void StartControlTask(void const * argument)
 
             uint8_t control_success = 0;
 
-            /* ZONE 1 */
-            if (strstr(control_command, "ZONE=1") != NULL)
+            /* MODE CONTROL:
+             *   <CMD,SEQ=x,MODE=AUTO>
+             *   <CMD,SEQ=x,MODE=MANUAL> */
+            if (strstr(control_command, "MODE=AUTO") != NULL)
             {
-                if (strstr(control_command, "IRR=ON") != NULL)
+                Debug_Print("[CONTROL] MODE -> AUTO\r\n");
+
+                /* Safely stop any manual/previous irrigation before AUTO takes over. */
+                StopAllIrrigation();
+                Relay_Release();
+
+                irr_mode = MODE_AUTO;
+                irr_state = IRR_IDLE;
+                irr_measure_pending = 0;
+
+                sensor_data_valid = 0;			// Xóa value cũ để đo lại sensor ngay khi vào AUTO.
+                last_sensor_update_tick = 0;	// Reset timer
+
+                zone1_cycle = 0;
+                zone2_cycle = 0;
+                last_cmd_time = 0;	// Reset timer -> Để timer cũ không ảnh hưởng tới chế độ mới.
+
+                control_success = 1;
+            }
+            else if (strstr(control_command, "MODE=MANUAL") != NULL)
+            {
+                Debug_Print("[CONTROL] MODE -> MANUAL\r\n");
+
+                /* Cancel AUTO immediately and leave all outputs in a safe OFF state. */
+                StopAllIrrigation();
+                Relay_Release();
+
+                irr_mode = MODE_MANUAL;
+                irr_state = IRR_IDLE;
+                irr_measure_pending = 0;
+                zone1_cycle = 0;
+                zone2_cycle = 0;
+                last_cmd_time = 0;	// Reset timer
+
+                control_success = 1;
+            }
+
+            /* ZONE 1 */
+            else if (strstr(control_command, "ZONE=1") != NULL)
+            {
+            	if (irr_mode != MODE_MANUAL)
+            	{
+            	    Debug_Print("[CONTROL] ZONE1 rejected - not in MANUAL mode\r\n");
+            	    control_success = 0;
+            	}
+            	else if (strstr(control_command, "IRR=ON") != NULL)
                 {
                     Debug_Print("[CONTROL] ZONE1 -> ON\r\n");
 
-                    Relay_RequestManual();
+                    /* Nếu Zone1 đã đang được MANUAL tưới
+                     * thì không restart relay/pump */
+                    if (relay_owner == RELAY_OWNER_MANUAL && valve1_state == VALVE_ON)
+                    {
+                        Debug_Print("[CONTROL] ZONE1 already ON\r\n");
 
-                    StartZone1();
+                        /* Start/refresh manual watering safety timer. */
+                        last_cmd_time = HAL_GetTick();
 
-                    HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
-                    control_success = 1;
+                        HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
+
+                        control_success = 1;
+                    }
+                    else
+                    {
+                        /* Zone1 chưa chạy.
+                         * Có thể Zone2 đang chạy -> Relay_Manual()
+                         * -> Stop hệ thống cũ trước khi chuyển sang Zone1 */
+                        Relay_Manual();
+
+                        StartZone1();
+
+                        last_cmd_time = HAL_GetTick();
+
+                        HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
+
+                        control_success = 1;
+                    }
+
                 }
                 else if (strstr(control_command, "IRR=OFF") != NULL)
                 {
                     Debug_Print("[CONTROL] ZONE1 -> OFF\r\n");
 
-                    StopCurrentZone(RELAY_OWNER_MANUAL);
+                    if (relay_owner == RELAY_OWNER_MANUAL)
+                    {
+                        if (valve1_state == VALVE_ON)
+                        {
+                            StopCurrentZone(RELAY_OWNER_MANUAL);
 
-                    Relay_Release();
+                            Relay_Release();
+                            last_cmd_time = 0;
 
-                    HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
+                            HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
 
-                    control_success = 1;
+                            control_success = 1;
+                        }
+                        else
+                        {
+                            /* Zone1 vốn đã OFF. Không được làm ảnh hưởng Zone2 nếu Zone2 đang tưới */
+                            Debug_Print("[CONTROL] ZONE1 already OFF\r\n");
+
+                            control_success = 1;
+                        }
+                    }
+                    else if (relay_owner == RELAY_OWNER_NONE)
+                    {
+                        /* Relay vốn đã OFF -> trả SUCCESS */
+                        Debug_Print("[CONTROL] ZONE1 already OFF\r\n");
+
+                        last_cmd_time = 0;
+                        HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
+
+                        control_success = 1;
+                    }
+                    else
+                    {
+                        /* Không được release owner của task khác -> RELAY_OWNER_AUTO */
+                        Debug_Print("[CONTROL] ZONE1 OFF rejected - relay not owned by MANUAL\r\n");
+
+                        control_success = 0;
+                    }
                 }
             }
 
             /* ZONE 2 */
             else if (strstr(control_command, "ZONE=2") != NULL)
             {
-                if (strstr(control_command, "IRR=ON") != NULL)
+            	if (irr_mode != MODE_MANUAL)
+            	{
+            	    Debug_Print("[CONTROL] ZONE2 rejected - not in MANUAL mode\r\n");
+            	    control_success = 0;
+            	}
+            	else if (strstr(control_command, "IRR=ON") != NULL)
                 {
                     Debug_Print("[CONTROL] ZONE2 -> ON\r\n");
 
-                    Relay_RequestManual();
+                    if (relay_owner == RELAY_OWNER_MANUAL && valve2_state == VALVE_ON)
+                    {
+                        Debug_Print("[CONTROL] ZONE2 already ON\r\n");
 
-                    StartZone2();
+                        /* Refresh safety timeout */
+                        last_cmd_time = HAL_GetTick();
 
-                    HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
+                        HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
 
-                    control_success = 1;
+                        control_success = 1;
+                    }
+                    else
+                    {
+                        Relay_Manual();
+
+                        StartZone2();
+
+                        last_cmd_time = HAL_GetTick();
+
+                        HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
+
+                        control_success = 1;
+                    }
                 }
                 else if (strstr(control_command, "IRR=OFF") != NULL)
                 {
                     Debug_Print("[CONTROL] ZONE2 -> OFF\r\n");
 
-                    StopCurrentZone(RELAY_OWNER_MANUAL);
+                    if (relay_owner == RELAY_OWNER_MANUAL)
+                    {
+                        if (valve2_state == VALVE_ON)
+                        {
+                            StopCurrentZone(RELAY_OWNER_MANUAL);
 
-                    Relay_Release();
+                            Relay_Release();
+                            last_cmd_time = 0;
 
-                    HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
+                            HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
 
-                    control_success = 1;
+                            control_success = 1;
+                        }
+                        else
+                        {
+                            Debug_Print("[CONTROL] ZONE2 already OFF\r\n");
+
+                            control_success = 1;
+                        }
+                    }
+                    else if (relay_owner == RELAY_OWNER_NONE)
+                    {
+                        Debug_Print("[CONTROL] ZONE2 already OFF\r\n");
+
+                        last_cmd_time = 0;
+                        HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
+
+                        control_success = 1;
+                    }
+                    else
+                    {
+                        Debug_Print("[CONTROL] ZONE2 OFF rejected - relay not owned by MANUAL\r\n");
+
+                        control_success = 0;
+                    }
                 }
             }
 
@@ -1723,6 +2076,20 @@ void StartIrrigationTask(void const * argument)
         if(event.status == osEventSignal)
         {
             Debug_Print("[AUTO] Sensor measurement received\r\n");
+        }
+
+        /* Manual irrigation safety timeout.
+         * If an OFF command is lost (LoRa/Wi-Fi/ESP32 failure),
+         * the STM32 still stops the pump and closes the valves locally. */
+        if (relay_owner == RELAY_OWNER_MANUAL && last_cmd_time != 0U && (HAL_GetTick() - last_cmd_time) >= MANUAL_WATER_TIMEOUT_MS)
+        {
+            Debug_Print("[SAFETY] Manual watering timeout -> force OFF\r\n");
+
+            StopCurrentZone(RELAY_OWNER_MANUAL);
+            Relay_Release();
+            last_cmd_time = 0U;
+
+            HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);		// Debug
         }
 
         Irrigation_AutoUpdate();
