@@ -70,6 +70,13 @@ typedef enum
     RELAY_OWNER_AUTO
 }RelayOwner;
 
+typedef enum
+{
+    WAKE_NONE = 0,
+    WAKE_RTC,
+    WAKE_LORA
+} WakeSource;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -125,7 +132,7 @@ typedef enum
 #define IRRIGATION_READ_SIGNAL  0x20
 #define IRRIGATION_READY_SIGNAL 0x40
 
-/* (Kham khảo) Giá trị tạm thời, sẽ đo lại thực tế ở 2 khu đất */
+/* (Kham khảo) Giá trị tạm th�?i, sẽ đo lại thực tế ở 2 khu đất */
 #define SOIL1_ADC_DRY   3000
 #define SOIL1_ADC_WET   1500
 
@@ -138,18 +145,22 @@ typedef enum
 #define SOIL_STOP_THRESHOLD     55.0f
 
 /* (Kham khảo) Tưới theo xung:
- * Tưới      : 30 giây
- * Nghỉ thấm : 60 giây
- * Tối đa    : 3 phút */
+ * Tưới      : 2 giây
+ * Nghỉ thấm : 10 giây
+ * Tối đa    : 5 chu kỳ */
 #define WATER_PULSE_MS      	2000
 #define SOAK_TIME_MS       		10000
-#define MAX_ZONE_TIME_MS   		10000
 #define MAX_IRRIGATION_CYCLE 	5
+
+/* RTC Low Power Wakeup Interval */
+#define RTC_WAKEUP_INTERVAL_SEC   60U
 
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+
+RTC_HandleTypeDef hrtc;
 
 TIM_HandleTypeDef htim1;
 
@@ -168,14 +179,12 @@ volatile uint16_t temp = 0, humi = 0;
 uint16_t soil1_adc, soil2_adc, adc_val;			// ADC default: 12 bit
 volatile float sm1 = 0, sm2 = 0;  				// Soil Moisture
 volatile uint8_t sensor_data_valid = 0;
-volatile uint32_t last_sensor_update_tick = 0;	// Thời điểm gần nhất SensorTask đọc sensor thành công
+volatile uint32_t last_sensor_update_tick = 0;	// Th�?i điểm gần nhất SensorTask đ�?c sensor thành công
 
 /* Battery */
 volatile float battery_voltage = 0.0f;
 volatile uint8_t battery_percent = 0;
 
-uint32_t last_readSoil = 0;
-uint32_t last_readDHT = 0;
 uint32_t last_cmd_time = 0;
 
 char tx_buff[128];
@@ -188,10 +197,9 @@ volatile uint8_t idx = 0;
 volatile uint8_t frame_receive = 0;
 volatile uint8_t frame_ready = 0;
 
-/* Đếm frame bị bỏ nếu frame cũ chưa xử lý xong */
+/* Count frame drop nếu frame cũ chưa xử lý xong */
 volatile uint32_t rx_frame_drop_count = 0;
 
-uint32_t wakeStart = 0;
 volatile uint8_t lora_wakeup_flag = 0;
 
 char control_command[64];
@@ -209,13 +217,13 @@ volatile ValveState valve1_state = VALVE_OFF;
 volatile ValveState valve2_state = VALVE_OFF;
 volatile IrrigationState irr_state = IRR_IDLE;
 volatile RelayOwner relay_owner = RELAY_OWNER_NONE;
+volatile WakeSource wake_source = WAKE_NONE;
 
 uint32_t irr_state_start = 0;
-uint32_t zone1_total_water_time = 0;
-uint32_t zone2_total_water_time = 0;
-volatile uint8_t irr_measure_request = 0;
 volatile uint8_t irr_measure_pending = 0;
 uint8_t zone1_cycle = 0, zone2_cycle = 0;
+
+volatile uint8_t rtc_wakeup_flag = 0;
 
 /* USER CODE END PV */
 
@@ -226,6 +234,7 @@ static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_RTC_Init(void);
 void StartLoRaTask(void const * argument);
 void StartSensorTask(void const * argument);
 void StartControlTask(void const * argument);
@@ -266,6 +275,9 @@ static void Relay_Manual(void);
 static void Relay_Auto(void);
 static void Relay_Release(void);
 
+void RTC_Print_Time(void);
+void RTC_SetAlarmAfterSeconds(uint8_t seconds);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -301,13 +313,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_ADC1_Init();
   MX_USART2_UART_Init();
-
-  /* Hiệu chuẩn ADC1 để tăng độ chính xác */
-  if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
 
   DHT11_Init(&DHT11, &htim1, DHT11_PORT, DHT11_PIN);
@@ -390,9 +396,10 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_LSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
@@ -414,7 +421,8 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_RTC|RCC_PERIPHCLK_ADC;
+  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
   PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
@@ -464,6 +472,63 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief RTC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_RTC_Init(void)
+{
+
+  /* USER CODE BEGIN RTC_Init 0 */
+
+  /* USER CODE END RTC_Init 0 */
+
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef DateToUpdate = {0};
+
+  /* USER CODE BEGIN RTC_Init 1 */
+
+  /* USER CODE END RTC_Init 1 */
+  /** Initialize RTC Only
+  */
+  hrtc.Instance = RTC;
+  hrtc.Init.AsynchPrediv = RTC_AUTO_1_SECOND;
+  hrtc.Init.OutPut = RTC_OUTPUTSOURCE_ALARM;
+  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* USER CODE BEGIN Check_RTC_BKUP */
+
+  /* USER CODE END Check_RTC_BKUP */
+
+  /** Initialize RTC and set the Time and Date
+  */
+  sTime.Hours = 0;
+  sTime.Minutes = 0;
+  sTime.Seconds = 0;
+
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  DateToUpdate.WeekDay = RTC_WEEKDAY_MONDAY;
+  DateToUpdate.Month = RTC_MONTH_JANUARY;
+  DateToUpdate.Date = 1;
+  DateToUpdate.Year = 26;
+
+  if (HAL_RTC_SetDate(&hrtc, &DateToUpdate, RTC_FORMAT_BIN) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
+
+  /* USER CODE END RTC_Init 2 */
 
 }
 
@@ -649,6 +714,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
 }
 
+void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
+{
+	rtc_wakeup_flag = 1;
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
@@ -756,7 +826,7 @@ static void StopAllIrrigation(void)
     HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, RELAY_OFF);
     HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, RELAY_OFF);
 
-    /* Đồng bộ trạng thái phần mềm với trạng thái relay thực tế.
+    /* �?ồng bộ trạng thái phần m�?m với trạng thái relay thực tế.
      * Nếu không cập nhật hai biến này, DATA gửi lên ESP32/Web có thể vẫn báo van ON dù relay đã OFF */
     valve1_state = VALVE_OFF;
     valve2_state = VALVE_OFF;
@@ -764,7 +834,7 @@ static void StopAllIrrigation(void)
 
 static void StopCurrentZone(RelayOwner owner)
 {
-	/* Để tránh trường hợp AUTO can thiệp vào khi MANNUAL đang sở hữu Relay */
+	/* �?ể tránh trư�?ng hợp AUTO can thiệp vào khi MANNUAL đang sở hữu Relay */
     if(owner != relay_owner)
     {
         Debug_Print("[RELAY] Stop rejected\r\n");
@@ -817,10 +887,10 @@ static void Irrigation_AutoUpdate(void)
             uint8_t zone1 = (sm1 < SOIL_START_THRESHOLD);
             uint8_t zone2 = (sm2 < SOIL_START_THRESHOLD);
 
-            /* Không Zone nào khô -> Đủ ẩm */
+            /* Không Zone nào khô -> �?ủ ẩm */
             if (!zone1 && !zone2)
             {
-                /* Nếu hệ thống thực sự đã OFF hoàn toàn thì không gọi lại StopAllIrrigation() để tránh block 300ms lặp liên tục */
+                /* Nếu hệ thống thực sự đã OFF hoàn toàn thì không g�?i lại StopAllIrrigation() để tránh block 300ms lặp liên tục */
                 if (relay_owner != RELAY_OWNER_NONE || valve1_state != VALVE_OFF || valve2_state != VALVE_OFF)
                 {
                     Debug_Print("[AUTO] IDLE -> ensure irrigation OFF\r\n");
@@ -1157,7 +1227,7 @@ static void Process_Command(char *cmd)
      * ESP32 retries the exact same frame with the same SEQ when ACK is lost.
      * In that case, do NOT execute the relay/mode command again; only resend ACK.
      * Lưu ý: kiểm tra cả SEQ lẫn nội dung command, chứ không chỉ kiểm tra SEQ.
-     * Cách này an toàn hơn trong trường hợp ESP32 reboot và sequence bắt đầu lại. */
+     * Cách này an toàn hơn trong trư�?ng hợp ESP32 reboot và sequence bắt đầu lại. */
     if (last_cmd_valid && last_cmd_seq == seq && strcmp(last_cmd, cmd) == 0 && (HAL_GetTick() - last_cmd_tick) <= CMD_DUPLICATE_MS)
     {
         Debug_Print("[CMD] Duplicate -> ACK only\r\n");
@@ -1225,7 +1295,7 @@ static uint8_t Wait_For_Frame(uint32_t timeout)
             return 0;
         }
 
-        osDelay(1);	// Nhường CPU cho task khác 1ms
+        osDelay(1);	// Như�?ng CPU cho task khác 1ms
     }
 
     return 1;
@@ -1323,7 +1393,7 @@ static float Soil_ADC_ToPercent(uint16_t adc, uint16_t adc_dry, uint16_t adc_wet
     /* TH phổ biến: DRY ADC > WET ADC */
     moisture = ((float)adc_dry - (float)adc) * 100.0f / ((float)adc_dry - (float)adc_wet);
 
-    /* Đảm bảo giá trị độ ẩm nằm trong khoảng [0, 100]% */
+    /* �?ảm bảo giá trị độ ẩm nằm trong khoảng [0, 100]% */
     if (moisture > 100.0f)
         moisture = 100.0f;
 
@@ -1380,19 +1450,15 @@ static void read_Battery(void)
 
 static uint8_t Can_Enter_Stop_Mode(void)
 {
-    /* AUTO cần CPU hoạt động để tự kiểm tra sensor định kỳ.
-     * Sau này có thể thay bằng RTC wake-up để tiết kiệm năng lượng. */
-    if (irr_mode == MODE_AUTO)
-    {
-        return 0;
-    }
-
     /* Chỉ được STOP khi toàn bộ hệ thống đang IDLE */
 
-    /* 1. AUTO irrigation đang chạy */
-    if (irr_state != IRR_IDLE)
+    /* 1. AUTO irrigation đang chạy (AUTO chỉ được STOP khi đang IDLE) */
+    if (irr_mode == MODE_AUTO)
     {
-        return 0;
+        if (irr_state != IRR_IDLE)
+        {
+            return 0;
+        }
     }
 
     /* 2. Relay đang thuộc MANUAL hoặc AUTO */
@@ -1407,14 +1473,14 @@ static uint8_t Can_Enter_Stop_Mode(void)
         return 0;
     }
 
-    /* 4. UART đang nhận một frame */
-    if (frame_receive)
+    /* 4. UART đang nhận một frame hoặc đã nhận frame nhưng LoRaTask chưa xử lý */
+    if (frame_receive || frame_ready)
     {
         return 0;
     }
 
-    /* 5. Đã nhận frame nhưng LoRaTask chưa xử lý */
-    if (frame_ready)
+    /* 5. E32 đang bận TX/RX */
+    if(HAL_GPIO_ReadPin(LORA_AUX_PORT,LORA_AUX_PIN) == GPIO_PIN_RESET)
     {
         return 0;
     }
@@ -1428,10 +1494,8 @@ static void Enter_Stop_Mode(void)
      * POWER-1:
      * Không reset parser/buffer trước STOP.
      * Khóa interrupt trong khoảng kiểm tra cuối -> vào STOP
-     * để UART ISR không thể publish frame rồi bị bỏ mất.
+     * để UART ISR không thể publish frame rồi bị b�? mất.
      */
-
-    lora_wakeup_flag = 0;
 
     /* =========================================================
      * 1. ATOMIC FINAL CHECK
@@ -1440,7 +1504,7 @@ static void Enter_Stop_Mode(void)
 
     /*
      * Nếu đã có frame, đang nhận frame,
-     * hoặc UART đã có byte chờ xử lý -> không được STOP.
+     * hoặc UART đã có byte ch�? xử lý -> không được STOP.
      */
     if (frame_ready || frame_receive || __HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE))
     {
@@ -1543,7 +1607,7 @@ static uint8_t LoRa_WaitReady(uint32_t timeout)
             return 0;
         }
 
-        /* Nhường CPU cho các FreeRTOS task khác.
+        /* Như�?ng CPU cho các FreeRTOS task khác.
          * Tránh busy-wait chiếm CPU liên tục khi E32 đang BUSY */
         osDelay(1);
     }
@@ -1619,6 +1683,67 @@ static void Relay_Release(void)
     Debug_Print("[RELAY] Owner released\r\n");
 }
 
+void RTC_Print_Time(void)
+{
+    RTC_TimeTypeDef sTime;
+    RTC_DateTypeDef sDate;
+
+    HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+
+    HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
+
+    char msg[100];
+
+    snprintf(msg, sizeof(msg), "RTC %02d:%02d:%02d - %02d/%02d/20%d\r\n",
+             sTime.Hours,
+             sTime.Minutes,
+             sTime.Seconds,
+             sDate.Date,
+             sDate.Month,
+             sDate.Year);
+
+    Debug_Print(msg);
+}
+
+void RTC_SetAlarmAfterSeconds(uint8_t seconds)
+{
+    RTC_TimeTypeDef sTime;
+    RTC_AlarmTypeDef sAlarm = {0};
+
+    /* Clear RTC Alarm cũ trước khi set alarm mới */
+    HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
+    __HAL_RTC_ALARM_CLEAR_FLAG(&hrtc, RTC_FLAG_ALRAF);
+
+
+    HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+
+    uint8_t alarm_sec, alarm_min, alarm_hour;
+    uint32_t total_sec;
+
+    total_sec = sTime.Seconds + seconds;
+
+    alarm_sec = total_sec % 60;
+
+    total_sec = sTime.Minutes + (total_sec / 60);
+
+    alarm_min = total_sec % 60;
+
+    alarm_hour = (sTime.Hours + (total_sec / 60)) % 24;
+
+    sAlarm.AlarmTime.Hours = alarm_hour;
+
+    sAlarm.AlarmTime.Minutes = alarm_min;
+
+    sAlarm.AlarmTime.Seconds = alarm_sec;
+
+    sAlarm.Alarm = RTC_ALARM_A;
+
+    /* Set alarm với interrupt vì sẽ có 1 hàm callback được gọi khi RTC alarm xảy ra */
+    HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BIN);
+
+    Debug_Print("[RTC] Alarm Set!\r\n");
+}
+
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartLoRaTask */
@@ -1639,7 +1764,7 @@ void StartLoRaTask(void const * argument)
     {
     	/* ============================================
     	 * Ưu tiên xử lý frame nếu UART đã nhận đủ frame.
-    	 * Điều này cho phép LoRa hoạt động cả khi AUTO, không cho STM32 vào STOP mode.
+    	 * Cho phép LoRa hoạt động cả khi AUTO, không cho STM32 vào STOP mode.
     	 * ============================================ */
     	if (frame_ready)
     	{
@@ -1678,7 +1803,7 @@ void StartLoRaTask(void const * argument)
 	    }
 
 	    /* DOUBLE CHECK:
-	     * Trong th�?i gian chuyển E32 sang Power Saving,
+	     * Trong time chuyển E32 sang Power Saving,
 	     * task khác có thể vừa bắt đầu hoạt động */
 	    if (!Can_Enter_Stop_Mode())
 	    {
@@ -1690,38 +1815,72 @@ void StartLoRaTask(void const * argument)
 	        continue;
 	    }
 
-	    /* 3. STM32 → STOP MODE */
+	    /* 3. AUTO LOW POWER: Khi AUTO IDLE -> ngủ bằng RTC */
+	    if(irr_mode == MODE_AUTO && irr_state == IRR_IDLE)
+	    {
+	        RTC_SetAlarmAfterSeconds(RTC_WAKEUP_INTERVAL_SEC);
+	    }
+
+	    /* 4. STM32 → STOP MODE */
 
 	    Debug_Print("[POWER] Enter STM32 STOP\r\n");
 	    Enter_Stop_Mode();
 
-	    /* 4. AUX WAKE */
-
-	    if (!lora_wakeup_flag)
+	    /* Không có event - Quay lại -> Tránh xử lý wake giả */
+	    if(!rtc_wakeup_flag && !lora_wakeup_flag)
 	    {
-	    	Debug_Print("[WAKE] Wake source NOT LoRa AUX\r\n");
 	        continue;
 	    }
 
-	    Debug_Print("[AUX] LoRa AUX wake detected\r\n");
-
-	    /* 5. WAIT LoRa UART FRAME (E32 TXD → STM32 USART1) */
-
-	    if (!Wait_For_Frame(FRAME_TIMEOUT_MS))
+	    /* 5. RTC WAKE or LORA AUX WAKE */
+	    if(lora_wakeup_flag)			// Ưu tiên CMD từ user trong TH wake xảy ra đồng thời
 	    {
-	        /* Wake nhưng không nhận đủ frame */
-	    	Debug_Print("[ERROR] UART1 FRAME TIMEOUT\r\n");
-	        continue;
+	        wake_source = WAKE_LORA;
+	        rtc_wakeup_flag = 0;		// Clear rtc_wakeup_flag khi LoRa wake xảy ra đồng thời
+	    }
+	    else if(rtc_wakeup_flag)
+	    {
+	        wake_source = WAKE_RTC;
+	        lora_wakeup_flag = 0;		// Tương tự
 	    }
 
-	    Debug_Print("[UART1] Frame received: ");
-	    Debug_Print(rx_frame_buffer);
-	    Debug_Print("\r\n");
+	    if(wake_source == WAKE_RTC)
+	    {
+	        Debug_Print("[WAKE] Source = RTC\r\n");
 
-	    /* 6. PROCESS REQ / CMD */
+	        if(irr_mode == MODE_AUTO && irr_state == IRR_IDLE)
+	        {
+	            Irrigation_Measure();
+	        }
 
-	    Process_Frame(rx_frame_buffer);
-	    frame_ready = 0;
+	        wake_source = WAKE_NONE;
+	        continue;	// Sleep lại
+	    }
+
+	    if(wake_source == WAKE_LORA)
+	    {
+	        Debug_Print("[WAKE] Source = LoRa AUX\r\n");
+
+	        /* WAIT LoRa UART FRAME (E32 TXD → STM32 RX USART1) */
+	        if (!Wait_For_Frame(FRAME_TIMEOUT_MS))
+	        {
+	        	/* Wake nhưng không nhận đủ frame */
+	            Debug_Print("[ERROR] UART1 FRAME TIMEOUT\r\n");
+
+	            frame_ready = 0;			// Bỏ Frame cũ khi timeout
+	            wake_source = WAKE_NONE;
+	            continue;
+	        }
+
+		    Debug_Print("[UART1] Frame received: ");
+		    Debug_Print(rx_frame_buffer);
+		    Debug_Print("\r\n");
+
+	        Process_Frame(rx_frame_buffer);
+	        frame_ready = 0;
+
+	        wake_source = WAKE_NONE;
+	    }
 
         UBaseType_t watermark = uxTaskGetStackHighWaterMark(NULL);	// Check mức stack thấp nhất còn lại của task.
         snprintf(dbg, sizeof(dbg), "[LoRaTask STACK] Min free = %lu words\r\n", (unsigned long)watermark);
@@ -1729,7 +1888,6 @@ void StartLoRaTask(void const * argument)
 
 	    /* Guard time trước khi chuyển mode E32 */
 	    osDelay(10);
-
     }
 
   /* USER CODE END 5 */
@@ -1763,7 +1921,7 @@ void StartSensorTask(void const * argument)
         {
         	uint32_t signals = event.value.signals;
 
-            /* Nếu có ít nhất một yêu cầu đọc sensor, chỉ đọc toàn bộ sensor 1 lần */
+            /* Nếu có ít nhất một yêu cầu đ�?c sensor, chỉ đ�?c toàn bộ sensor 1 lần */
         	if (signals & (SENSOR_READ_SIGNAL | IRRIGATION_READ_SIGNAL))
             {
             	Debug_Print("[SENSOR TASK] Read sensors\r\n");
@@ -1847,7 +2005,7 @@ void StartControlTask(void const * argument)
 
                 zone1_cycle = 0;
                 zone2_cycle = 0;
-                last_cmd_time = 0;	// Reset timer -> Để timer cũ không ảnh hưởng tới chế độ mới.
+                last_cmd_time = 0;	// Reset timer -> �?ể timer cũ không ảnh hưởng tới chế độ mới.
 
                 control_success = 1;
             }
