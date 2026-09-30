@@ -119,7 +119,7 @@ typedef enum
 #define FRAME_TIMEOUT_MS			1000
 #define CMD_DUPLICATE_MS 			30000U  	// ESP32 retry window: avoid executing the same CMD twice
 #define MANUAL_WATER_TIMEOUT_MS 	60000U  	// Safety: auto-stop manual watering after 60 s
-#define AUTO_SENSOR_INTERVAL_MS    	60000U   	// AUTO đo lại sensor mỗi 60 giây
+#define AUTO_SENSOR_INTERVAL_MS    	10000U   	// AUTO đo lại sensor mỗi 60 giây
 
 /* Mỗi signal dùng một bit riêng */
 #define SENSOR_READ_SIGNAL     	0x01		// 0x01 → LoRaTask yêu cầu SensorTask read sensors
@@ -152,8 +152,11 @@ typedef enum
 #define SOAK_TIME_MS       		10000
 #define MAX_IRRIGATION_CYCLE 	5
 
-/* RTC Low Power Wakeup Interval */
-#define RTC_WAKEUP_INTERVAL_SEC   60U
+/* RTC Low Power Wakeup Interval (60s) */
+#define RTC_WAKEUP_INTERVAL_SEC   10U
+
+/* Debug mode (1): disable STOP mode while using CubeIDE debugger */
+#define DEBUG_NO_STOP   0
 
 /* USER CODE END PM */
 
@@ -212,7 +215,7 @@ char last_cmd[64] = {0};
 
 char dbg[80];
 
-volatile IrrigationMode irr_mode = MODE_MANUAL;
+volatile IrrigationMode irr_mode = MODE_AUTO;
 volatile ValveState valve1_state = VALVE_OFF;
 volatile ValveState valve2_state = VALVE_OFF;
 volatile IrrigationState irr_state = IRR_IDLE;
@@ -296,7 +299,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+   HAL_Init();
 
   /* USER CODE BEGIN Init */
   /* USER CODE END Init */
@@ -325,9 +328,6 @@ int main(void)
   Debug_Print("\r\n====================\r\n");
   Debug_Print("STM32 NODE START\r\n");
   Debug_Print("====================\r\n");
-
-
-  Debug_Print("[TEST] Relay test start\r\n");
 
   /* USER CODE END 2 */
 
@@ -1295,7 +1295,7 @@ static uint8_t Wait_For_Frame(uint32_t timeout)
             return 0;
         }
 
-        osDelay(1);	// Như�?ng CPU cho task khác 1ms
+        osDelay(1);	// Nhuong CPU cho task khác 1ms
     }
 
     return 1;
@@ -1441,7 +1441,7 @@ static void read_Battery(void)
 
     HAL_ADC_ConfigChannel(&hadc1, &sConfig);
 
-    /* �?�?c điện áp Battery */
+    /* Read điện áp Battery */
     battery_voltage = Battery_ReadVoltage();
 
     /* Chuyển điện áp -> % */
@@ -1450,6 +1450,10 @@ static void read_Battery(void)
 
 static uint8_t Can_Enter_Stop_Mode(void)
 {
+	#if DEBUG_NO_STOP
+    	return 0;
+	#endif
+
     /* Chỉ được STOP khi toàn bộ hệ thống đang IDLE */
 
     /* 1. AUTO irrigation đang chạy (AUTO chỉ được STOP khi đang IDLE) */
@@ -1490,35 +1494,15 @@ static uint8_t Can_Enter_Stop_Mode(void)
 
 static void Enter_Stop_Mode(void)
 {
-    /*
-     * POWER-1:
-     * Không reset parser/buffer trước STOP.
-     * Khóa interrupt trong khoảng kiểm tra cuối -> vào STOP
-     * để UART ISR không thể publish frame rồi bị b�? mất.
-     */
-
     /* =========================================================
      * 1. ATOMIC FINAL CHECK
      * ========================================================= */
+
     __disable_irq();
 
-    /*
-     * Nếu đã có frame, đang nhận frame,
-     * hoặc UART đã có byte ch�? xử lý -> không được STOP.
-     */
-    if (frame_ready || frame_receive || __HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE))
+    /* Nếu đã có frame or đang nhận frame or UART đã có byte wait xử lý -> No STOP */
+    if (lora_wakeup_flag || rtc_wakeup_flag || frame_ready || frame_receive || __HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE))
     {
-        __enable_irq();
-        return;
-    }
-
-    /*
-     * AUX LOW = E32 đang có hoạt động.  Không được đi ngủ.
-     */
-    if (HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_RESET)
-    {
-        lora_wakeup_flag = 1;
-
         __enable_irq();
         return;
     }
@@ -1527,52 +1511,27 @@ static void Enter_Stop_Mode(void)
      * 2. CLEAR OLD WAKE FLAGS
      * ========================================================= */
 
-    __HAL_GPIO_EXTI_CLEAR_IT(LORA_AUX_PIN);
+    __HAL_GPIO_EXTI_CLEAR_IT(LORA_AUX_PIN);		// Clear EXTI pending cũ để tránh vừa vào STOP đã wake
 
-    HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
+    HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);	// Clear NVIC pending của EXTI15
 
-    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
-
-    /*
-     * Sau khi clear pending, kiểm tra AUX lần cuối.
-     * Interrupt vẫn đang disable nên không có ISR chen ngang.
-     */
-    if (HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_RESET)
-    {
-        lora_wakeup_flag = 1;
-
-        __enable_irq();
-        return;
-    }
+    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);			// Clear Power Wakeup Flag nếu còn
 
     /* =========================================================
      * 3. PREPARE STOP
      * ========================================================= */
 
+    // 1. Stop HAL TICK: HAL Timebase hiện tại = TIM2
     HAL_SuspendTick();
 
-    /* Stop FreeRTOS SysTick interrupt */
+    // 2. STOP FreeRTOS SysTick
     SysTick->CTRL &= ~SysTick_CTRL_TICKINT_Msk;
 
-    /* Clear SysTick pending */
+    // Clear SysTick pending interrupt cũ
     SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk;
 
-    /*
-     * Final safety check ngay trước WFI.
-     */
-    if (HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_RESET)
-    {
-        lora_wakeup_flag = 1;
-
-        HAL_ResumeTick();
-        SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
-
-        __enable_irq();
-        return;
-    }
-
     /* =========================================================
-     * 4. ENTER STOP
+     * 4. ENTER STOP MODE (WFI = Wait For Interrupt)
      * ========================================================= */
 
     HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -1587,11 +1546,7 @@ static void Enter_Stop_Mode(void)
 
     SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
 
-    /*
-     * Khi enable IRQ:
-     * EXTI AUX đang pending sẽ chạy callback và set
-     * lora_wakeup_flag = 1.
-     */
+    /* Khi enable IRQ: EXTI AUX đang pending sẽ chạy vào callback và set lora_wakeup_flag = 1 */
     __enable_irq();
 }
 
@@ -1713,7 +1668,7 @@ void RTC_SetAlarmAfterSeconds(uint8_t seconds)
     /* Clear RTC Alarm cũ trước khi set alarm mới */
     HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
     __HAL_RTC_ALARM_CLEAR_FLAG(&hrtc, RTC_FLAG_ALRAF);
-
+    __HAL_RTC_ALARM_EXTI_CLEAR_FLAG();
 
     HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
 
@@ -1791,8 +1746,7 @@ void StartLoRaTask(void const * argument)
 
     	/* 2. E32 → POWER-SAVING */
 
-        Debug_Print("[POWER] System IDLE\r\n");
-	  	Debug_Print("[POWER] E32 -> POWER SAVING\r\n");
+        Debug_Print("[POWER] System IDLE => E32 -> POWER SAVING\r\n");
 	    LoRa_SetPowerSavingMode();
 
 	    if (!LoRa_WaitReady(100))
@@ -1802,22 +1756,23 @@ void StartLoRaTask(void const * argument)
 	        continue;
 	    }
 
-	    /* DOUBLE CHECK:
-	     * Trong time chuyển E32 sang Power Saving,
-	     * task khác có thể vừa bắt đầu hoạt động */
-	    if (!Can_Enter_Stop_Mode())
-	    {
-	        Debug_Print("[POWER] STOP cancelled - system became busy\r\n");
-
-	        LoRa_SetNormalMode();
-	        LoRa_WaitReady(100);
-
-	        continue;
-	    }
-
 	    /* 3. AUTO LOW POWER: Khi AUTO IDLE -> ngủ bằng RTC */
+
+	    /* AUX can toggle while E32 changes operating mode */
+	    __disable_irq();
+
+	    lora_wakeup_flag = 0;
+	    rtc_wakeup_flag = 0;
+	    wake_source = WAKE_NONE;
+	    __HAL_GPIO_EXTI_CLEAR_IT(LORA_AUX_PIN);
+	    HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
+
+	    __enable_irq();
+
 	    if(irr_mode == MODE_AUTO && irr_state == IRR_IDLE)
 	    {
+	    	Debug_Print("[RTC TEST] AUTO IDLE -> SET RTC\r\n");
+
 	        RTC_SetAlarmAfterSeconds(RTC_WAKEUP_INTERVAL_SEC);
 	    }
 
@@ -1826,22 +1781,28 @@ void StartLoRaTask(void const * argument)
 	    Debug_Print("[POWER] Enter STM32 STOP\r\n");
 	    Enter_Stop_Mode();
 
-	    /* Không có event - Quay lại -> Tránh xử lý wake giả */
-	    if(!rtc_wakeup_flag && !lora_wakeup_flag)
-	    {
-	        continue;
-	    }
-
 	    /* 5. RTC WAKE or LORA AUX WAKE */
-	    if(lora_wakeup_flag)			// Ưu tiên CMD từ user trong TH wake xảy ra đồng thời
+	    __disable_irq();
+
+	    uint8_t woke_by_lora = lora_wakeup_flag;
+	    uint8_t woke_by_rtc = rtc_wakeup_flag;
+	    lora_wakeup_flag = 0;
+	    rtc_wakeup_flag = 0;
+
+	    __enable_irq();
+
+	    if(woke_by_lora)			// Ưu tiên CMD từ user trong TH wake xảy ra đồng thời
 	    {
 	        wake_source = WAKE_LORA;
-	        rtc_wakeup_flag = 0;		// Clear rtc_wakeup_flag khi LoRa wake xảy ra đồng thời
 	    }
-	    else if(rtc_wakeup_flag)
+	    else if(woke_by_rtc)
 	    {
 	        wake_source = WAKE_RTC;
-	        lora_wakeup_flag = 0;		// Tương tự
+	    }
+	    else
+	    {
+	        wake_source = WAKE_NONE;
+	        continue;
 	    }
 
 	    if(wake_source == WAKE_RTC)
