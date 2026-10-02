@@ -8,15 +8,17 @@
 
 typedef enum
 {
-    VALVE_OFF,
-    VALVE_ON,
+    /* Logical LoRa states, independent of the STM32 relay GPIO polarity. */
+    VALVE_OFF = 0,
+    VALVE_ON = 1,
     VALVE_UNKNOWN
 } ValveState;
 
 typedef enum
 {
-    PUMP_OFF,
-    PUMP_ON,
+    /* Logical LoRa states, independent of the STM32 relay GPIO polarity. */
+    PUMP_OFF = 0,
+    PUMP_ON = 1,
     PUMP_UNKNOWN
 } PumpState;
 

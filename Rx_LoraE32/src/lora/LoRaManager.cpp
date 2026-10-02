@@ -364,7 +364,7 @@ static void handleTelemetryFrame(const String &frame)
 
     lastTelemetryAt = millis();             // Cập nhật thời điểm nhận frame telemetry mới nhất
     telemetryStreaming = data.streaming;
-    
+
     /* Nếu đang streaming mà nhận được frame telemetry mới, không reset lastRequest 
      * để tránh gửi REQ ngay sau đó. Chỉ reset lastRequest khi streaming kết thúc. */ 
     if (!telemetryStreaming)
@@ -396,7 +396,7 @@ static void processLoRaFrame(const String &frame)
         handleReceivedData(frame);
         return;
     }
-
+ 
     // ACK
     if (frame.startsWith("<ACK"))
     {

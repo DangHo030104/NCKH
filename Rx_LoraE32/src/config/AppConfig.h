@@ -23,8 +23,8 @@
 #define TFT_MOSI 23
 
 /* WiFi */
-static const char *ssid = "BLACK";
-static const char *password = "12345678";
+static const char *ssid = "Pho Tro Tret";
+static const char *password = "Ngoc4795";
 
 /* HIVEMQ CLOUD */
 static const char *mqtt_server = "10cf23427b77452faec8dc86e09f1bc1.s1.eu.hivemq.cloud";
@@ -39,7 +39,7 @@ static const char *publish_topic = "iot/sensor/data/ae21d58a097942caa8f7";
 // ESP32 nhận command từ Web
 static const char *subscribe_topic = "iot/device/control/ae21d58a097942caa8f7";
 
-const unsigned long REQUEST_INTERVAL = 15000;       // 30s
+const unsigned long REQUEST_INTERVAL = 30000;       // 30s
 const unsigned long DATA_TIMEOUT_MS = 5000;         // Time Wait DATA STM32 sau khi gửi REQ
 const unsigned long CMD_ACK_TIMEOUT_MS = 5000;      // Time Wait ACK STM32 sau khi gửi CMD
 const unsigned long TELEMETRY_TIMEOUT_MS = 2500;    // Resume polling if the live stream drop.

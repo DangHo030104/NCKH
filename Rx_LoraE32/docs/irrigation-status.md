@@ -14,6 +14,9 @@ pending request:
 - `valve1`/`valve2`: `0=OFF`, `1=ON`.
 - `pump`: `0=OFF`, `1=ON`.
 - `mode`: `0=MANUAL`, `1=AUTO`.
+- These are logical protocol states. On the STM32 hardware, the two valve
+  relays are active-low while the pump relay is active-high; the ESP32 must
+  not invert these received values.
 - Status becomes unknown on screen when sensor DATA reaches
   `SENSOR_STALE_TIMEOUT_MS`; a fresh DATA response restores reported values.
 - ACK and outgoing commands do not set valve state or irrigation mode.
