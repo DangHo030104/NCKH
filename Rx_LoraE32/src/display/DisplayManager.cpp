@@ -144,19 +144,26 @@ static void updateDisplay(const SensorData &data, bool hasData, uint32_t receive
     dashboardFrame.fillRect(0, 103, 160, 11, bg);
     dashboardFrame.setTextSize(1);
     // One shared irrigation mode; show only fresh status reported by STM32.
+    /* V1:ON V2:OFF P:ON AUTO */ 
     const ValveState valves[] = {
         hasData && !stale ? data.valve1 : VALVE_UNKNOWN,
         hasData && !stale ? data.valve2 : VALVE_UNKNOWN};
+    const PumpState pump = hasData && !stale ? data.pump : PUMP_UNKNOWN;    
     const IrrigationMode mode = hasData && !stale ? data.irrigationMode : MODE_UNKNOWN;
     for (int i = 0; i < 2; ++i)
     {
-        dashboardFrame.setCursor(i == 0 ? 5 : 56, 105);
+        dashboardFrame.setCursor(i == 0 ? 3 : 43, 105);
         dashboardFrame.setTextColor(muted);
         dashboardFrame.print(i == 0 ? "V1:" : "V2:");
         dashboardFrame.setTextColor(valves[i] == VALVE_ON ? green : (valves[i] == VALVE_OFF ? muted : 0xFD68));
         dashboardFrame.print(valves[i] == VALVE_ON ? "ON" : (valves[i] == VALVE_OFF ? "OFF" : "--"));
     }
-    dashboardFrame.setCursor(119, 105);
+    dashboardFrame.setCursor(83, 105);
+    dashboardFrame.setTextColor(muted);
+    dashboardFrame.print("P:");
+    dashboardFrame.setTextColor(pump == PUMP_ON ? green : (pump == PUMP_OFF ? muted : 0xFD68));
+    dashboardFrame.print(pump == PUMP_ON ? "ON" : (pump == PUMP_OFF ? "OFF" : "--"));
+    dashboardFrame.setCursor(124, 105);
     dashboardFrame.setTextColor(mode == MODE_AUTO ? green : (mode == MODE_MANUAL ? 0x4DDF : 0xFD68));
     dashboardFrame.print(mode == MODE_AUTO ? "AUTO" : (mode == MODE_MANUAL ? "MANUAL" : "--"));
     dashboardFrame.fillRect(0, 114, 160, 14, bg);
@@ -164,18 +171,25 @@ static void updateDisplay(const SensorData &data, bool hasData, uint32_t receive
     dashboardFrame.setTextSize(1);
     dashboardFrame.setTextColor(radioColor);
     dashboardFrame.setCursor(14, 118);
-    dashboardFrame.print(!hasData ? "WAIT" : (stale ? "OLD" : "LIVE"));
-    if (hasData)
+    char liveText[20] = "WAIT";
+    if (hasData && stale)
+        snprintf(liveText, sizeof(liveText), "OLD");
+    else if (hasData && data.streaming)
     {
-        char text[24];
-        if (age / 1000 > 9999)
-            snprintf(text, sizeof(text), ">9999s");
+        const char *phase = data.irrigationPhase == IRRIGATION_PHASE_WATERING ? "WATER" :
+                            data.irrigationPhase == IRRIGATION_PHASE_SOAK ? "SOAK" :
+                            data.irrigationPhase == IRRIGATION_PHASE_MEASURING ? "MEASURE" :
+                            data.irrigationPhase == IRRIGATION_PHASE_FAILED ? "FAIL" : "IDLE";
+        if (data.irrigationMode == MODE_AUTO)
+            snprintf(liveText, sizeof(liveText), "Z%u %s C%u",
+                     (unsigned int)data.activeZone, phase, (unsigned int)data.irrigationCycle);
         else
-            snprintf(text, sizeof(text), "%lus", (unsigned long)(age / 1000));
-        dashboardFrame.setTextColor(muted);
-        dashboardFrame.setCursor(44, 118);
-        dashboardFrame.print(text);
+            snprintf(liveText, sizeof(liveText), "Z%u %s",
+                     (unsigned int)data.activeZone, phase);
     }
+    else if (hasData)
+        snprintf(liveText, sizeof(liveText), "LIVE %lus", (unsigned long)(age / 1000));
+    dashboardFrame.print(liveText);
 
     // Pin thuộc về thiết bị (STM32) từ xa; ẩn mức pin (--%) khi dữ liệu đã cũ.
     const bool batteryValid = hasData && !stale && data.batteryPercent <= 100;
@@ -212,10 +226,15 @@ static void updateDisplay(const SensorData &data, bool hasData, uint32_t receive
     static char previousClock[6] = "";
     static uint16_t previousWifi = 0, previousRadio = 0;
     static ValveState previousValves[2] = {VALVE_UNKNOWN, VALVE_UNKNOWN};
+    static PumpState previousPump = PUMP_UNKNOWN;
     static IrrigationMode previousMode = MODE_UNKNOWN;
     static bool previousHasData = false;
     static uint32_t previousAgeSeconds = 0;
     static uint8_t previousBatteryPercent = 0;
+    static uint8_t previousActiveZone = 0;
+    static IrrigationPhase previousPhase = IRRIGATION_PHASE_UNKNOWN;
+    static uint8_t previousCycle = 0;
+    static bool previousStreaming = false;
     static char previousValues[4][20] = {};
 
     if (!initialized || strcmp(previousClock, clockText) != 0)
@@ -239,10 +258,12 @@ static void updateDisplay(const SensorData &data, bool hasData, uint32_t receive
     }
 
     if (!initialized || previousValves[0] != valves[0] ||
-        previousValves[1] != valves[1] || previousMode != mode)
+        previousValves[1] != valves[1] || previousPump != pump || previousMode != mode)
         flushDashboardRegion(0, 103, 160, 11);
     if (!initialized || previousHasData != hasData || previousRadio != radioColor ||
         previousBatteryPercent != data.batteryPercent ||
+        previousActiveZone != data.activeZone || previousPhase != data.irrigationPhase ||
+        previousCycle != data.irrigationCycle || previousStreaming != data.streaming ||
         (hasData && previousAgeSeconds != age / 1000))
         flushDashboardRegion(0, 114, 160, 14);
 
@@ -251,10 +272,15 @@ static void updateDisplay(const SensorData &data, bool hasData, uint32_t receive
     previousRadio = radioColor;
     previousValves[0] = valves[0];
     previousValves[1] = valves[1];
+    previousPump = pump;
     previousMode = mode;
     previousHasData = hasData;
     previousAgeSeconds = age / 1000;
     previousBatteryPercent = data.batteryPercent;
+    previousActiveZone = data.activeZone;
+    previousPhase = data.irrigationPhase;
+    previousCycle = data.irrigationCycle;
+    previousStreaming = data.streaming;
     initialized = true;
 }
 
@@ -271,7 +297,7 @@ void DisplayManager_Begin(QueueHandle_t displayData)
     tft.setTextSize(1);
     tft.setCursor(20, 20);
     tft.println("SMART FARM IoT");
-    delay(1000);
+    vTaskDelay(pdMS_TO_TICKS(1000));    
 }
 
 void DisplayManager_Run(void *pvParameters)

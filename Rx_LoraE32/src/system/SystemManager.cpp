@@ -20,7 +20,7 @@ void SystemManager_Begin(void)
     TaskManager_Queues queues = {};
     if (!TaskManager_CreateQueues(&queues))
     {
-        while (1) { delay(1000); }
+        while (1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
     }
 
     DisplayManager_Begin(queues.displayData);
@@ -33,6 +33,6 @@ void SystemManager_Begin(void)
     {
         Serial.println("[ERROR] Task creation failed -> restarting");
         ESP.restart();
-        while (1) { delay(1000); }
+        while (1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
     }
 }

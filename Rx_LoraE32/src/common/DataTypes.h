@@ -15,10 +15,27 @@ typedef enum
 
 typedef enum
 {
+    PUMP_OFF,
+    PUMP_ON,
+    PUMP_UNKNOWN
+} PumpState;
+
+typedef enum
+{
     MODE_MANUAL,
     MODE_AUTO,
     MODE_UNKNOWN
 } IrrigationMode;
+
+typedef enum
+{
+    IRRIGATION_PHASE_IDLE,
+    IRRIGATION_PHASE_WATERING,
+    IRRIGATION_PHASE_SOAK,
+    IRRIGATION_PHASE_MEASURING,
+    IRRIGATION_PHASE_FAILED,
+    IRRIGATION_PHASE_UNKNOWN
+} IrrigationPhase;
 
 typedef enum
 {
@@ -48,10 +65,14 @@ typedef struct
     // Reported by STM32 in DATA, never inferred from a command ACK.
     ValveState valve1;
     ValveState valve2;
+    PumpState pump;
     
     IrrigationMode irrigationMode;
-
     uint8_t batteryPercent;
+    uint8_t activeZone;
+    IrrigationPhase irrigationPhase;
+    uint8_t irrigationCycle;
+    bool streaming;
 } SensorData;
 
 typedef struct

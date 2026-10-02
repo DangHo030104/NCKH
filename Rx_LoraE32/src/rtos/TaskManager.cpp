@@ -18,10 +18,13 @@ static QueueHandle_t displayQueue;
 
 bool TaskManager_CreateQueues(TaskManager_Queues *queues)
 {
-    /* Create Queues */
+    /* commandQueue vẫn giữ 5 phần tử vì command không được phép tự động ghi đè */
     commandQueue = xQueueCreate(5, sizeof(LoRaCommand));
-    mqttDataQueue = xQueueCreate(5, sizeof(SensorData));
-    displayQueue = xQueueCreate(5, sizeof(SensorData));
+
+    /* (mqttDataQueue, displayQueue) 1 phần tử -> ghi đè dữ liệu mới nhất vào queue giúp giảm độ trễ khi ESP32 nhận dữ liệu từ STM32. 
+        Nếu queue có nhiều phần tử, ESP32 sẽ phải đọc hết các phần tử cũ trước khi nhận được dữ liệu mới nhất */
+    mqttDataQueue = xQueueCreate(1, sizeof(SensorData));
+    displayQueue = xQueueCreate(1, sizeof(SensorData));
 
     if (commandQueue == NULL || mqttDataQueue == NULL || displayQueue == NULL)
     {

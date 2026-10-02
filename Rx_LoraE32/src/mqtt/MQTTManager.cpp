@@ -47,7 +47,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
     }
 
     /* MODE command: {"mode":"AUTO"} or {"mode":"MANUAL"} */
-    const char *mode = doc["mode"];     // Lấy trường mode (AUTO hoặc MANUAL)
+    const char *mode = doc["mode"]; // Lấy trường mode (AUTO hoặc MANUAL)
 
     if (mode != nullptr)
     {
@@ -152,10 +152,12 @@ static void reconnectMQTT(void)
         lastMqttReconnectAttempt = 0;
 
         // Subscribe control topic -> để broker chuyển message từ web về ESP32
-        mqttClient.subscribe(subscribe_topic);
+        bool subscribed = mqttClient.subscribe(subscribe_topic);
 
-        Serial.print("[MQTT] Subscribed: ");
-        Serial.println(subscribe_topic);
+        Serial.print("[MQTT] Subscribe ");
+        Serial.print(subscribe_topic);
+        Serial.print(" : ");
+        Serial.println(subscribed ? "SUCCESS" : "FAILED");
     }
     else
     {
@@ -172,12 +174,17 @@ static void publishData(const SensorData &data)
     doc["H"] = data.humidity;
     doc["SM1"] = data.soil1;
     doc["SM2"] = data.soil2;
-    doc["seq"] = data.seq;
     doc["valve1"] = (data.valve1 == VALVE_ON) ? "ON" : "OFF";
     doc["valve2"] = (data.valve2 == VALVE_ON) ? "ON" : "OFF";
+    doc["pump"] = (data.pump == PUMP_ON) ? "ON" : "OFF";
     doc["mode"] = (data.irrigationMode == MODE_AUTO) ? "AUTO" : "MANUAL";
-    
-    char payload[200];
+    doc["battery"] = data.batteryPercent;
+    doc["activeZone"] = data.activeZone;
+    doc["phase"] = (uint8_t)data.irrigationPhase;
+    doc["cycle"] = data.irrigationCycle;
+    doc["streaming"] = data.streaming;
+
+    char payload[256];
 
     serializeJson(doc, payload, sizeof(payload)); // Chuyển JSON thành chuỗi và ghi vào payload
 
@@ -246,6 +253,6 @@ void MQTTManager_Run(void *pvParameters)
         }
 
         setMqttDisplayState(WiFiManager_IsConnected() && mqttClient.connected());
-        vTaskDelay(pdMS_TO_TICKS(2));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

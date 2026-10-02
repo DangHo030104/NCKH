@@ -30,6 +30,16 @@ static String pendingCommandFrame = "";      // Command frame đang được g�
 static unsigned long loraStateStartedAt = 0; // Lưu thời điểm bắt đầu chờ DATA hoặc ACK
 static uint8_t commandRetryCount = 0;
 
+/* ACTIVE IRRIGATION TELEMETRY */
+static bool telemetryStreaming = false;
+static unsigned long lastTelemetryAt = 0;
+
+/* E32 transparent mode exposes a UART byte stream, not application frame
+ * boundaries. Keep a small accumulator and extract each <...> frame so two
+ * packets arriving close together cannot be mistaken for one payload. */
+static String loraRxFrame = "";
+static const size_t LORA_FRAME_MAX_LENGTH = 191;
+
 /* RTOS QUEUES */
 static QueueHandle_t commandQueue;
 static QueueHandle_t mqttDataQueue;
@@ -55,7 +65,7 @@ static bool parseDataFrame(const String &frame, SensorData &data)
     if (!frame.startsWith("<D,") || !frame.endsWith(">"))
         return false;
 
-    // LoRa frame: <D,seq,temp,hum,soil1,soil2,valve1,valve2,mode,battery> -> Remove <D, and > from the frame
+    // LoRa frame: <D,seq,temp,hum,soil1,soil2,valve1,valve2,pump,mode,battery>
     String payload = frame.substring(3, frame.length() - 1);
 
     char buffer[128];
@@ -63,23 +73,20 @@ static bool parseDataFrame(const String &frame, SensorData &data)
     // Copy payload to buffer for tokenization
     payload.toCharArray(buffer, sizeof(buffer));
 
-    char *token;
-
-    float value[9];
+    float value[10];
 
     int index = 0;
 
     // Tokenize the buffer using comma as the delimiter
-    token = strtok(buffer, ",");
+    char *token = strtok(buffer, ",");
 
-    while (token != NULL && index < 9)
+    while (token != NULL && index < 10)
     {
-        value[index++] = atof(token);
-
-        token = strtok(NULL, ",");
+        value[index++] = atof(token);   // Convert token to float and store in value array
+        token = strtok(NULL, ",");      // Get the next token
     }
 
-    if (index != 9)
+    if (index != 10 || token != NULL)
         return false;
 
     data.seq = value[0];
@@ -89,10 +96,70 @@ static bool parseDataFrame(const String &frame, SensorData &data)
     data.soil2 = value[4];
     data.valve1 = value[5] ? VALVE_ON : VALVE_OFF;
     data.valve2 = value[6] ? VALVE_ON : VALVE_OFF;
-    data.irrigationMode = value[7] ? MODE_AUTO : MODE_MANUAL;
-    data.batteryPercent = (uint8_t)value[8];
-    data.receivedAt = millis();
+    data.pump = value[7] ? PUMP_ON : PUMP_OFF;
+    data.irrigationMode = value[8] ? MODE_AUTO : MODE_MANUAL;
+    data.batteryPercent = (uint8_t)value[9];
+    /* Khi parse DATA, các trường streaming được đặt về mặc định */
+    data.activeZone = 0;
+    data.irrigationPhase = IRRIGATION_PHASE_IDLE;
+    data.irrigationCycle = 0;
+    data.streaming = false;
+    data.receivedAt = millis();     // Ghi nhận thời điểm nhận frame DATA để xác định frame cũ hay mới.
 
+    return true;
+}
+
+static bool parseTelemetryFrame(const String &frame, SensorData &data)
+{
+    if (!frame.startsWith("<T,") || !frame.endsWith(">"))
+        return false;
+
+    // LoRa frame: <T,seq,temp,hum,soil1,soil2,valve1,valve2,pump,mode,battery,zone,phase,cycle>
+    String payload = frame.substring(3, frame.length() - 1);
+
+    char buffer[160];
+
+    if (payload.length() >= sizeof(buffer))
+        return false;
+
+    // Copy payload to buffer for tokenization
+    payload.toCharArray(buffer, sizeof(buffer));
+
+    float value[13];
+    int index = 0;
+    char *token = strtok(buffer, ",");  
+    while (token != NULL && index < 13)
+    {
+        value[index++] = atof(token);   // Convert token to float and store in value array
+        token = strtok(NULL, ",");      // Get the next token
+    }
+
+    if (index != 13 || token != NULL)
+        return false;
+
+const int zone = (int)value[10];
+const int phase = (int)value[11];
+const int cycle = (int)value[12];
+
+    if (zone < 0 || zone > 2 || phase < IRRIGATION_PHASE_IDLE ||
+        phase > IRRIGATION_PHASE_FAILED || cycle < 0 || cycle > 255)
+        return false;
+
+    data.seq = (uint32_t)value[0];
+    data.temperature = value[1];
+    data.humidity = value[2];
+    data.soil1 = value[3];
+    data.soil2 = value[4];
+    data.valve1 = value[5] ? VALVE_ON : VALVE_OFF;
+    data.valve2 = value[6] ? VALVE_ON : VALVE_OFF;
+    data.pump = value[7] ? PUMP_ON : PUMP_OFF;
+    data.irrigationMode = value[8] ? MODE_AUTO : MODE_MANUAL;
+    data.batteryPercent = (uint8_t)value[9];
+    data.activeZone = (uint8_t)zone;
+    data.irrigationPhase = (IrrigationPhase)phase;
+    data.irrigationCycle = (uint8_t)cycle;
+    data.streaming = data.activeZone != 0 || data.irrigationPhase != IRRIGATION_PHASE_IDLE;    
+    data.receivedAt = millis();     // Lưu thời điểm nhận frame DATA để xác định frame cũ hay mới.
     return true;
 }
 
@@ -160,7 +227,7 @@ static void sendRequest(void)
     printAuxState();
 
     /* Cho E32 ổn định hoàn toàn ở RX NORMAL */
-    delay(20);
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     /* Sau khi TX REQ, MASTER chỉ được chờ DATA */
     loraState = WAIT_DATA;
@@ -196,7 +263,7 @@ static void transmitPendingCommandFrame(void)
     printAuxState();
 
     /* Cho E32 ổn định hoàn toàn ở RX NORMAL */
-    delay(20);
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     Serial.print("Waiting ACK SEQ: ");
     Serial.println(waitingSeq);
@@ -278,18 +345,51 @@ static void handleReceivedData(const String &frame)
 
     Serial.println("DATA SEQ MATCH");
 
-    xQueueSend(mqttDataQueue, &data, 0);
-
-    xQueueSend(displayQueue, &data, 0);
+    xQueueOverwrite(mqttDataQueue, &data);
+    xQueueOverwrite(displayQueue, &data);
 
     Serial.println("[QUEUE] DATA SENT");
 
     loraState = LORA_IDLE;
 }
 
+static void handleTelemetryFrame(const String &frame)
+{
+    SensorData data = {};
+    if (!parseTelemetryFrame(frame, data))
+    {
+        Serial.println("INVALID TELEMETRY -> IGNORED");
+        return;
+    }
+
+    lastTelemetryAt = millis();             // Cập nhật thời điểm nhận frame telemetry mới nhất
+    telemetryStreaming = data.streaming;
+    
+    /* Nếu đang streaming mà nhận được frame telemetry mới, không reset lastRequest 
+     * để tránh gửi REQ ngay sau đó. Chỉ reset lastRequest khi streaming kết thúc. */ 
+    if (!telemetryStreaming)
+    {
+        // Start a fresh normal polling interval after final telemetry.
+        lastRequest = lastTelemetryAt;
+    }
+
+    /* Cập nhật dữ liệu telemetry vào mqttDataQueue và displayQueue */
+    xQueueOverwrite(mqttDataQueue, &data);
+    xQueueOverwrite(displayQueue, &data);
+
+    Serial.println("[QUEUE] LIVE TELEMETRY UPDATED");
+}
+
 /* Phân loại frame LoRa nhận được */
 static void processLoRaFrame(const String &frame)
 {
+    // Telemetry is asynchronous and must not complete/cancel a pending REQ or CMD.
+    if (frame.startsWith("<T,"))
+    {
+        handleTelemetryFrame(frame);
+        return;
+    }
+
     // DATA
     if (frame.startsWith("<D"))
     {
@@ -306,6 +406,45 @@ static void processLoRaFrame(const String &frame)
 
     Serial.print("Unknown LoRa Frame: ");
     Serial.println(frame);
+}
+
+/* Xử lý frame LoRa từ UART */
+static void receiveLoRaFrames(void)
+{
+    while (Serial2.available() > 0)
+    {
+        const char c = (char)Serial2.read();
+
+        /* Nếu nhận được ký tự '<', bắt đầu một khung mới */
+        if (c == '<')
+        {
+            loraRxFrame = "<";
+            continue;
+        }
+
+        /* Nếu khung nhận được rỗng, bỏ qua */
+        if (loraRxFrame.length() == 0)
+            continue;
+
+        /* Nếu khung nhận được quá dài, bỏ qua */
+        if (loraRxFrame.length() >= LORA_FRAME_MAX_LENGTH)
+        {
+            loraRxFrame = "";
+            Serial.println("[LORA] RX frame overflow -> discarded");
+            continue;
+        }
+
+        loraRxFrame += c;   // Thêm ký tự vào frame
+
+        /* Nếu nhận được ký tự '>', kết thúc khung */
+        if (c == '>')
+        {
+            Serial.print("\nLoRa RX FRAME: ");
+            Serial.println(loraRxFrame);
+            processLoRaFrame(loraRxFrame);
+            loraRxFrame = "";       // Reset frame for next frame
+        }
+    }
 }
 
 static void handleLoraTimeouts(void)
@@ -358,22 +497,17 @@ void LoRaManager_Run(void *pvParameters)
 
     for (;;)
     {
-        /* LORA RECEIVE  */
-        if (e32ttl100.available() > 0)
-        {
-            ResponseContainer rc = e32ttl100.receiveMessage();
-
-            if (rc.data.length() > 0)
-            {
-                Serial.print("\nLoRa RX: ");
-                Serial.println(rc.data);
-
-                processLoRaFrame(rc.data);
-            }
-        }
+        /* Read the E32 UART as a stream and process every complete <...> frame. */
+        receiveLoRaFrames();
 
         /* TIMEOUT  */
         handleLoraTimeouts();
+
+        if (telemetryStreaming && millis() - lastTelemetryAt >= TELEMETRY_TIMEOUT_MS)
+        {
+            telemetryStreaming = false;
+            Serial.println("[LORA] Telemetry timeout -> polling resumed");
+        }
 
         /* MASTER SCHEDULER */
         if (loraState == LORA_IDLE)
@@ -385,7 +519,7 @@ void LoRaManager_Run(void *pvParameters)
             }
 
             /* Không có CMD -> Polling sensor */
-            else if (millis() - lastRequest >= REQUEST_INTERVAL)
+            else if (!telemetryStreaming && millis() - lastRequest >= REQUEST_INTERVAL)
             {
                 lastRequest = millis();
                 sendRequest();
@@ -396,3 +530,4 @@ void LoRaManager_Run(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
+

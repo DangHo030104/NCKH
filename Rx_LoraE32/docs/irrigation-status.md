@@ -1,26 +1,38 @@
 # Irrigation status on the TFT
 
-The row at y=103..113 displays `V1:ON`, `V2:OFF`, and one shared
+The row at y=103..113 displays `V1:ON`, `V2:OFF`, `P:ON`, and one shared
 `AUTO` / `MANUAL` irrigation mode. It replaces the command/MQTT row.
 
-The receiver accepts these optional, case-sensitive fields in a valid DATA
-response whose SEQ matches the pending request:
+The receiver accepts this compact DATA response when its sequence matches the
+pending request:
 
 ```text
-<DATA,SEQ=25,T=28.5,H=75,SM1=62,SM2=48,V1=ON,V2=OFF,MODE=AUTO>
+<D,25,28.5,75,62,48,1,0,1,1,87>
 ```
 
-- `V1`, `V2`: `ON` or `OFF`.
-- `MODE`: `AUTO` or `MANUAL`, shared by both zones.
-- Missing, duplicate, or invalid status fields display `--` independently.
-- Sensor-only DATA remains supported; valve and mode values then display `--`.
+- Fields are `seq,temp,humidity,soil1,soil2,valve1,valve2,pump,mode,battery`.
+- `valve1`/`valve2`: `0=OFF`, `1=ON`.
+- `pump`: `0=OFF`, `1=ON`.
+- `mode`: `0=MANUAL`, `1=AUTO`.
 - Status becomes unknown on screen when sensor DATA reaches
   `SENSOR_STALE_TIMEOUT_MS`; a fresh DATA response restores reported values.
 - ACK and outgoing commands do not set valve state or irrigation mode.
 
-STM32 firmware must populate these fields from its current state. This receiver
-change does not implement automatic irrigation or change the transmitter.
 Relay output state is not proof of physical valve movement or water flow.
+
+## Live irrigation telemetry
+
+While MANUAL or AUTO irrigation is active, the STM32 sends an unsolicited
+snapshot once per second and immediately after irrigation state changes:
+
+```text
+<T,sseq,temp,hum,soil1,soil2,valve1,valve2,pump,mode,battery,zone,phase,cycle>
+```
+
+`phase` is `0=idle`, `1=watering`, `2=soak`, `3=measuring`, `4=failed`.
+The ESP32 pauses normal polling while active telemetry is arriving. An idle
+final snapshot ends the stream; if the stream disappears, polling resumes
+after `TELEMETRY_TIMEOUT_MS`.
 
 ## MQTT control commands
 
