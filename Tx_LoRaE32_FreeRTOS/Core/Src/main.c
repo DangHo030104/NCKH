@@ -103,8 +103,14 @@ typedef enum
 #define LED_PORT 			GPIOC
 #define LED_PIN  			GPIO_PIN_13    	// Test Debug
 
-#define RELAY_ON   			GPIO_PIN_SET
-#define RELAY_OFF  			GPIO_PIN_RESET
+/* Relay board electrical levels:
+ * - Zone valves use a 2-channel active-low relay board.
+ * - Pump uses a 1-channel active-high relay board.
+ * Logical valve_state/pump_state and LoRa payload remain 0=OFF, 1=ON. */
+#define VALVE_RELAY_ON     GPIO_PIN_RESET
+#define VALVE_RELAY_OFF    GPIO_PIN_SET
+#define PUMP_RELAY_ON      GPIO_PIN_SET
+#define PUMP_RELAY_OFF     GPIO_PIN_RESET
 
 #define LORA_AUX_PORT 		GPIOA
 #define LORA_AUX_PIN  		GPIO_PIN_15
@@ -141,10 +147,10 @@ typedef enum
 #define TELEMETRY_READ_SIGNAL   0x80			// → LoRaTask yêu cầu SensorTask tạo dữ liệu streaming
 
 /* (Kham khảo) Giá trị tạm thoi, sẽ đo lại thực tế ở 2 khu đất */
-#define SOIL1_ADC_DRY   3000
+#define SOIL1_ADC_DRY   4000
 #define SOIL1_ADC_WET   1500
 
-#define SOIL2_ADC_DRY   3000
+#define SOIL2_ADC_DRY   4000
 #define SOIL2_ADC_WET   1500
 
 /* (Kham khảo) Logic: SM < 35% → cần tưới | SM >= 55% → đủ nước
@@ -162,7 +168,7 @@ typedef enum
 #define MAX_IRRIGATION_CYCLE 	5
 
 /* RTC Low Power Wakeup Interval (60s) */
-#define RTC_WAKEUP_INTERVAL_SEC   5U
+#define RTC_WAKEUP_INTERVAL_SEC   15U
 
 /* Live telemetry is enabled only while an irrigation cycle is active. */
 #define TELEMETRY_INTERVAL_MS     1000U			// Trong lúc tưới ổn định, yêu cầu một snapshot mới mỗi 1s.
@@ -712,9 +718,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_11
-                          |GPIO_PIN_12, GPIO_PIN_RESET);
+  /* Safe relay defaults: active-low valves OFF, active-high pump OFF. */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5|GPIO_PIN_6, VALVE_RELAY_OFF);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, PUMP_RELAY_OFF);
+
+  /*Configure LoRa mode pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11|GPIO_PIN_12, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
@@ -829,19 +838,19 @@ static void StartZone1(void)
 	Debug_Print("[IRR] Start Zone1\r\n");
 
     /* Van Zone2 OFF */
-    HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, RELAY_OFF);
+    HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, VALVE_RELAY_OFF);
 
     /* Van Zone1 ON */
-    HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, RELAY_ON);
+    HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, VALVE_RELAY_ON);
 
     valve1_state = VALVE_ON;
     valve2_state = VALVE_OFF;
 
     /* Wait van mở ổn định */
-    osDelay(300);
+    osDelay(500);
 
     /* Bật Pump */
-    HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, RELAY_ON);
+    HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, PUMP_RELAY_ON);
 
     pump_state = PUMP_ON;
 
@@ -856,19 +865,19 @@ static void StartZone2(void)
 	Debug_Print("[IRR] Start Zone2\r\n");
 
 	/* Van Zone 1 OFF */
-    HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, RELAY_OFF);
+    HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, VALVE_RELAY_OFF);
 
     /* Van Zone2 ON */
-    HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, RELAY_ON);
+    HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, VALVE_RELAY_ON);
 
     valve1_state = VALVE_OFF;
     valve2_state = VALVE_ON;
 
     /* Wait van mở ổn định */
-    osDelay(300);
+    osDelay(500);
 
     /* Bật Pump */
-    HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, RELAY_ON);
+    HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, PUMP_RELAY_ON);
 
     pump_state = PUMP_ON;
 
@@ -883,15 +892,15 @@ static void StopAllIrrigation(void)
 	Debug_Print("[IRR] Stop all irrigation\r\n");
 
     /* Pump OFF trước */
-    HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, RELAY_OFF);
+    HAL_GPIO_WritePin(RELAY3_PORT, RELAY3_PIN, PUMP_RELAY_OFF);
 
     pump_state = PUMP_OFF;
 
-    osDelay(300);
+    osDelay(500);
 
     /* Sau đó đóng cả 2 van */
-    HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, RELAY_OFF);
-    HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, RELAY_OFF);
+    HAL_GPIO_WritePin(RELAY1_PORT, RELAY1_PIN, VALVE_RELAY_OFF);
+    HAL_GPIO_WritePin(RELAY2_PORT, RELAY2_PIN, VALVE_RELAY_OFF);
 
     valve1_state = VALVE_OFF;
     valve2_state = VALVE_OFF;
