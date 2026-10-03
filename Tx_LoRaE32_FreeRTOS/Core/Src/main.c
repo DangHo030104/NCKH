@@ -66,7 +66,10 @@ typedef enum
 
     IRR_ZONE2_WATERING,
     IRR_ZONE2_SOAK,
-	IRR_ZONE2_MEASURE
+	IRR_ZONE2_MEASURE,
+
+    /* AUTO lockout after a zone reaches MAX_IRRIGATION_CYCLE. */
+    IRR_FAILED
 } IrrigationState;
 
 typedef enum
@@ -245,6 +248,7 @@ volatile WakeSource wake_source = WAKE_NONE;
 uint32_t irr_state_start = 0;
 volatile uint8_t irr_measure_pending = 0;
 uint8_t zone1_cycle = 0, zone2_cycle = 0;
+volatile uint8_t irr_failed_zone = 0;
 
 volatile uint8_t rtc_wakeup_flag = 0;
 
@@ -1100,10 +1104,11 @@ static void Irrigation_AutoUpdate(void)
 
                     zone1_cycle = 0;
 
-                    Relay_Release();
                     irr_state = IRR_IDLE;
+                    irr_failed_zone = 0;
 
-                    telemetry_event_pending = 1;
+                    /* Publish the event only after the terminal state is stable. */
+                    Relay_Release();
                 }
                 else
                 {
@@ -1115,11 +1120,12 @@ static void Irrigation_AutoUpdate(void)
                     {
                         Debug_Print("[ERROR] Zone1 irrigation failed\r\n");
 
-                        Relay_Release();
-                        zone1_cycle = 0;
-                        irr_state = IRR_IDLE;
+                        StopAllIrrigation();
+                        irr_failed_zone = 1;
+                        irr_state = IRR_FAILED;
 
-                        telemetry_event_pending = 1;
+                        /* Keep FAILED latched and send one terminal telemetry. */
+                        Relay_Release();
 
                         break;
                     }
@@ -1186,10 +1192,11 @@ static void Irrigation_AutoUpdate(void)
 
                     zone2_cycle = 0;
 
-                    Relay_Release();
                     irr_state = IRR_IDLE;
+                    irr_failed_zone = 0;
 
-                    telemetry_event_pending = 1;
+                    /* Publish the event only after the terminal state is stable. */
+                    Relay_Release();
                 }
                 else
                 {
@@ -1201,11 +1208,12 @@ static void Irrigation_AutoUpdate(void)
                     {
                         Debug_Print("[ERROR] Zone2 irrigation failed\r\n");
 
-                        Relay_Release();
-                        zone2_cycle = 0;
-                        irr_state = IRR_IDLE;
+                        StopAllIrrigation();
+                        irr_failed_zone = 2;
+                        irr_state = IRR_FAILED;
 
-                        telemetry_event_pending = 1;
+                        /* Keep FAILED latched and send one terminal telemetry. */
+                        Relay_Release();
 
                         break;
                     }
@@ -1221,17 +1229,26 @@ static void Irrigation_AutoUpdate(void)
 
         }
 
+        case IRR_FAILED:
+        {
+            /* Require an explicit mode change before AUTO can try again. */
+            return;
+        }
+
         default:
         {
             Debug_Print("[ERROR] Invalid irrigation state -> reset\r\n");
 
             StopAllIrrigation();
-            Relay_Release();
 
             zone1_cycle = 0;
             zone2_cycle = 0;
 
             irr_state = IRR_IDLE;
+            irr_failed_zone = 0;
+
+            /* Publish only after the recovered state is complete. */
+            Relay_Release();
 
             break;
         }
@@ -1292,7 +1309,7 @@ static void Process_Request(char *frame)
     /* 3. WAIT SENSOR READY */
     osEvent event = osSignalWait(SENSOR_READY_SIGNAL, 2000);
 
-    if (event.status != osEventSignal)
+    if (event.status != osEventSignal || !(event.value.signals & SENSOR_READY_SIGNAL))
     {
         Debug_Print("[ERROR] SENSOR TASK TIMEOUT\r\n");
         return;
@@ -1360,7 +1377,8 @@ static void Process_Command(char *cmd)
     /* 5. WAIT CONTROL COMPLETE */
     osEvent event = osSignalWait(CONTROL_OK_SIGNAL | CONTROL_ERROR_SIGNAL, 2000);
 
-    if (event.status != osEventSignal)
+    if (event.status != osEventSignal ||
+        !(event.value.signals & (CONTROL_OK_SIGNAL | CONTROL_ERROR_SIGNAL)))
     {
         Debug_Print("[ERROR] CONTROL TASK TIMEOUT\r\n");
         return;
@@ -1595,7 +1613,7 @@ static uint8_t Can_Enter_Stop_Mode(void)
     /* 1. AUTO irrigation đang chạy (AUTO chỉ được STOP khi đang IDLE) */
     if (irr_mode == MODE_AUTO)
     {
-        if (irr_state != IRR_IDLE)
+        if (irr_state != IRR_IDLE && irr_state != IRR_FAILED)
         {
             return 0;
         }
@@ -1787,13 +1805,18 @@ static void Relay_Release(void)
 /* Xác định hệ thống có đang tưới hay không */
 static uint8_t Irrigation_IsActive(void)
 {
-    return relay_owner != RELAY_OWNER_NONE || irr_state != IRR_IDLE ||
-           valve1_state == VALVE_ON || valve2_state == VALVE_ON || pump_state == PUMP_ON;
+    uint8_t auto_active = irr_state == IRR_ZONE1_WATERING || irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE1_MEASURE ||
+                          irr_state == IRR_ZONE2_WATERING || irr_state == IRR_ZONE2_SOAK || irr_state == IRR_ZONE2_MEASURE;
+
+    return auto_active || relay_owner != RELAY_OWNER_NONE || valve1_state == VALVE_ON || valve2_state == VALVE_ON || pump_state == PUMP_ON;
 }
 
 /* Xác định Zone đang active (state van, state machine AUTO) */
 static uint8_t Irrigation_GetActiveZone(void)
 {
+    if (irr_state == IRR_FAILED)
+        return irr_failed_zone;
+
     if (valve1_state == VALVE_ON || irr_state == IRR_ZONE1_WATERING || irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE1_MEASURE)
         return 1;
 
@@ -1819,6 +1842,10 @@ static uint8_t Irrigation_GetPhase(void)
     if (irr_state == IRR_ZONE1_MEASURE || irr_state == IRR_ZONE2_MEASURE)
         return 3;
 
+    // 4: FAILED
+    if (irr_state == IRR_FAILED)
+        return 4;
+
     return 0;
 }
 
@@ -1827,6 +1854,9 @@ static uint8_t Irrigation_GetCycle(void)
 {
     if (irr_mode != MODE_AUTO)
         return 0;
+
+    if (irr_state == IRR_FAILED)
+        return MAX_IRRIGATION_CYCLE;
 
     // Zone 1
     if (Irrigation_GetActiveZone() == 1)
@@ -1947,17 +1977,19 @@ static uint8_t Process_Control_Command(void)
 
         /* Safely stop any manual/previous irrigation before AUTO takes over. */
         StopAllIrrigation();
-        Relay_Release();
 
         irr_mode = MODE_AUTO;
         irr_state = IRR_IDLE;
         irr_measure_pending = 0;
+        irr_failed_zone = 0;
 
         sensor_data_valid = 0;			// Xóa value cũ để đo lại sensor ngay khi vào AUTO.
         last_sensor_update_tick = 0;	// Reset timer
 
         zone1_cycle = 0;
         zone2_cycle = 0;
+        /* Trigger telemetry after every reported mode/state field is stable. */
+        Relay_Release();
         last_cmd_time = 0;	// Reset timer -> �?ể timer cũ không ảnh hưởng tới chế độ mới.
 
         control_success = 1;
@@ -1968,13 +2000,15 @@ static uint8_t Process_Control_Command(void)
 
         /* Cancel AUTO immediately and leave all outputs in a safe OFF state. */
         StopAllIrrigation();
-        Relay_Release();
 
         irr_mode = MODE_MANUAL;
         irr_state = IRR_IDLE;
         irr_measure_pending = 0;
+        irr_failed_zone = 0;
         zone1_cycle = 0;
         zone2_cycle = 0;
+        /* Trigger telemetry after every reported mode/state field is stable. */
+        Relay_Release();
         last_cmd_time = 0;	// Reset timer
 
         control_success = 1;
@@ -2418,12 +2452,9 @@ void StartIrrigationTask(void const * argument)
         /* 1. Kiểm tra CMD từ LoRaTask */
         osEvent event = osSignalWait(CONTROL_EXEC_SIGNAL,0);
 
-        if(event.status == osEventSignal)
+        if(event.status == osEventSignal && (event.value.signals & CONTROL_EXEC_SIGNAL))
         {
-
-            uint8_t result;
-
-            result = Process_Control_Command();
+            uint8_t result = Process_Control_Command();
 
             if(result)
             {
@@ -2439,7 +2470,7 @@ void StartIrrigationTask(void const * argument)
         /* WAIT Sensor measurement COMPLETE */
         osEvent sensor_event = osSignalWait(IRRIGATION_READY_SIGNAL, 0);
 
-        if(sensor_event.status == osEventSignal)
+        if(sensor_event.status == osEventSignal && (sensor_event.value.signals & IRRIGATION_READY_SIGNAL))
         {
             Debug_Print("[AUTO] Sensor measurement completed\r\n");
         }
