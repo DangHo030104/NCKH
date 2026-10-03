@@ -174,6 +174,11 @@ static void updateDisplay(const SensorData &data, bool hasData, uint32_t receive
     char liveText[20] = "WAIT";
     if (hasData && stale)
         snprintf(liveText, sizeof(liveText), "OLD");
+    else if (hasData && !stale && data.irrigationPhase == IRRIGATION_PHASE_FAILED)
+    {
+        snprintf(liveText, sizeof(liveText), "Z%u FAIL C%u",
+                 (unsigned int)data.activeZone, (unsigned int)data.irrigationCycle);
+    }
     else if (hasData && data.streaming)
     {
         const char *phase = data.irrigationPhase == IRRIGATION_PHASE_WATERING ? "WATER" :

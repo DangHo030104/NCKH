@@ -82,8 +82,8 @@ static bool parseDataFrame(const String &frame, SensorData &data)
 
     while (token != NULL && index < 10)
     {
-        value[index++] = atof(token);   // Convert token to float and store in value array
-        token = strtok(NULL, ",");      // Get the next token
+        value[index++] = atof(token); // Convert token to float and store in value array
+        token = strtok(NULL, ",");    // Get the next token
     }
 
     if (index != 10 || token != NULL)
@@ -104,7 +104,7 @@ static bool parseDataFrame(const String &frame, SensorData &data)
     data.irrigationPhase = IRRIGATION_PHASE_IDLE;
     data.irrigationCycle = 0;
     data.streaming = false;
-    data.receivedAt = millis();     // Ghi nhận thời điểm nhận frame DATA để xác định frame cũ hay mới.
+    data.receivedAt = millis(); // Ghi nhận thời điểm nhận frame DATA để xác định frame cũ hay mới.
 
     return true;
 }
@@ -127,19 +127,19 @@ static bool parseTelemetryFrame(const String &frame, SensorData &data)
 
     float value[13];
     int index = 0;
-    char *token = strtok(buffer, ",");  
+    char *token = strtok(buffer, ",");
     while (token != NULL && index < 13)
     {
-        value[index++] = atof(token);   // Convert token to float and store in value array
-        token = strtok(NULL, ",");      // Get the next token
+        value[index++] = atof(token); // Convert token to float and store in value array
+        token = strtok(NULL, ",");    // Get the next token
     }
 
     if (index != 13 || token != NULL)
         return false;
 
-const int zone = (int)value[10];
-const int phase = (int)value[11];
-const int cycle = (int)value[12];
+    const int zone = (int)value[10];
+    const int phase = (int)value[11];
+    const int cycle = (int)value[12];
 
     if (zone < 0 || zone > 2 || phase < IRRIGATION_PHASE_IDLE ||
         phase > IRRIGATION_PHASE_FAILED || cycle < 0 || cycle > 255)
@@ -158,8 +158,12 @@ const int cycle = (int)value[12];
     data.activeZone = (uint8_t)zone;
     data.irrigationPhase = (IrrigationPhase)phase;
     data.irrigationCycle = (uint8_t)cycle;
-    data.streaming = data.activeZone != 0 || data.irrigationPhase != IRRIGATION_PHASE_IDLE;    
-    data.receivedAt = millis();     // Lưu thời điểm nhận frame DATA để xác định frame cũ hay mới.
+    /* FAILED is a terminal snapshot. Only active irrigation phases keep the
+     * live stream open and suppress normal REQ polling. */
+    data.streaming = data.irrigationPhase == IRRIGATION_PHASE_WATERING ||
+                     data.irrigationPhase == IRRIGATION_PHASE_SOAK ||
+                     data.irrigationPhase == IRRIGATION_PHASE_MEASURING;
+    data.receivedAt = millis(); // Lưu thời điểm nhận frame DATA để xác định frame cũ hay mới.
     return true;
 }
 
@@ -362,12 +366,13 @@ static void handleTelemetryFrame(const String &frame)
         return;
     }
 
-    lastTelemetryAt = millis();             // Cập nhật thời điểm nhận frame telemetry mới nhất
-    telemetryStreaming = data.streaming;
+    const bool wasStreaming = telemetryStreaming;
+    lastTelemetryAt = millis();          // Cập nhật thời điểm nhận frame telemetry mới nhất
+    telemetryStreaming = data.streaming; // Cập nhật trạng thái streaming
 
-    /* Nếu đang streaming mà nhận được frame telemetry mới, không reset lastRequest 
-     * để tránh gửi REQ ngay sau đó. Chỉ reset lastRequest khi streaming kết thúc. */ 
-    if (!telemetryStreaming)
+    /* Nếu đang streaming mà nhận được frame telemetry mới, không reset lastRequest
+     * để tránh gửi REQ ngay sau đó. Chỉ reset lastRequest khi streaming kết thúc. */
+    if (wasStreaming && !telemetryStreaming)
     {
         // Start a fresh normal polling interval after final telemetry.
         lastRequest = lastTelemetryAt;
@@ -396,7 +401,7 @@ static void processLoRaFrame(const String &frame)
         handleReceivedData(frame);
         return;
     }
- 
+
     // ACK
     if (frame.startsWith("<ACK"))
     {
@@ -434,7 +439,7 @@ static void receiveLoRaFrames(void)
             continue;
         }
 
-        loraRxFrame += c;   // Thêm ký tự vào frame
+        loraRxFrame += c; // Thêm ký tự vào frame
 
         /* Nếu nhận được ký tự '>', kết thúc khung */
         if (c == '>')
@@ -442,7 +447,7 @@ static void receiveLoRaFrames(void)
             Serial.print("\nLoRa RX FRAME: ");
             Serial.println(loraRxFrame);
             processLoRaFrame(loraRxFrame);
-            loraRxFrame = "";       // Reset frame for next frame
+            loraRxFrame = ""; // Reset frame for next frame
         }
     }
 }
@@ -530,4 +535,3 @@ void LoRaManager_Run(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
-
