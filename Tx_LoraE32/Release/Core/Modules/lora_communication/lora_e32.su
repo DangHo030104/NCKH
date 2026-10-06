@@ -1,0 +1,6 @@
+lora_e32.c:13:6:LoRaE32_Init	8	static
+lora_e32.c:22:9:LoRaE32_WaitReady	24	static
+lora_e32.c:37:9:LoRaE32_WaitForFrame	24	static
+lora_e32.c:49:6:LoRaE32_SetNormalMode	8	static
+lora_e32.c:58:6:LoRaE32_SetPowerSavingMode	8	static
+lora_e32.c:67:6:HAL_UART_RxCpltCallback	16	static

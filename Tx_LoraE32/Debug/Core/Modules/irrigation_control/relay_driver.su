@@ -1,0 +1,4 @@
+relay_driver.c:9:6:RelayDriver_StartZone1	8	static
+relay_driver.c:31:6:RelayDriver_StartZone2	8	static
+relay_driver.c:52:6:RelayDriver_StopAll	8	static
+relay_driver.c:73:6:RelayDriver_StopCurrent	16	static

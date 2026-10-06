@@ -1,0 +1,3 @@
+battery.c:31:6:Battery_Init	16	static
+battery.c:38:7:Battery_ReadVoltage	48	static
+battery.c:83:9:Battery_GetPercent	48	static

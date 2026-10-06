@@ -1,0 +1,3 @@
+rtc_service.c:8:6:RtcService_PrintTime	160	static
+rtc_service.c:23:6:RtcService_SetAlarmAfterSeconds	32	static
+rtc_service.c:46:6:HAL_RTC_AlarmAEventCallback	16	static

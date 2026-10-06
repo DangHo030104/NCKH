@@ -1,0 +1,2 @@
+system_manager.c:55:6:SystemManager_Init	8	static
+system_manager.c:69:6:SystemManager_GetSensorSnapshot	16	static

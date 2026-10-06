@@ -43,6 +43,17 @@
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.includepaths.329361183" name="Include paths (-I)" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.includepaths" useByScannerDiscovery="false" valueType="includePath">
 									<listOptionValue builtIn="false" value="../Core/Inc"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/app_common"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/debug_console"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/irrigation_control"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/lora_communication"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/power_manager"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/rtos_tasks"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/sensor_manager"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/system_manager"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/telemetry_manager"/>
+									<listOptionValue builtIn="false" value="../Core/Lib/DHT11"/>
+									<listOptionValue builtIn="false" value="../Core/Lib/battery"/>
 									<listOptionValue builtIn="false" value="../Drivers/STM32F1xx_HAL_Driver/Inc"/>
 									<listOptionValue builtIn="false" value="../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Device/ST/STM32F1xx/Include"/>
@@ -75,7 +86,7 @@
 							<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.objcopy.symbolsrec.313514408" name="MCU Output Converter Motorola S-rec with symbols" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.objcopy.symbolsrec"/>
 						</toolChain>
 					</folderInfo>
-					<fileInfo id="com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.debug.950555407.1102772451" name="DHT11.h" rcbsApplicability="disable" resourcePath="Core/Inc/DHT11.h" toolsToInvoke="">
+					<fileInfo id="com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.debug.950555407.1102772451" name="DHT11.h" rcbsApplicability="disable" resourcePath="Core/Lib/DHT11/DHT11.h" toolsToInvoke="">
 						<tool customBuildStep="true" id="org.eclipse.cdt.managedbuilder.ui.rcbs.651689042" name="Resource Custom Build Step">
 							<inputType id="org.eclipse.cdt.managedbuilder.ui.rcbs.inputtype.1453581847" name="Resource Custom Build Step Input Type">
 								<additionalInput kind="additionalinputdependency" paths=""/>
@@ -128,6 +139,17 @@
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.includepaths.727519511" name="Include paths (-I)" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.option.includepaths" useByScannerDiscovery="false" valueType="includePath">
 									<listOptionValue builtIn="false" value="../Core/Inc"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/app_common"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/debug_console"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/irrigation_control"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/lora_communication"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/power_manager"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/rtos_tasks"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/sensor_manager"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/system_manager"/>
+									<listOptionValue builtIn="false" value="../Core/Modules/telemetry_manager"/>
+									<listOptionValue builtIn="false" value="../Core/Lib/DHT11"/>
+									<listOptionValue builtIn="false" value="../Core/Lib/battery"/>
 									<listOptionValue builtIn="false" value="../Drivers/STM32F1xx_HAL_Driver/Inc"/>
 									<listOptionValue builtIn="false" value="../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Device/ST/STM32F1xx/Include"/>

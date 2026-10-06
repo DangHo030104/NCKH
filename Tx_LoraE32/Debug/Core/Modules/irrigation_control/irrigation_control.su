@@ -1,0 +1,12 @@
+irrigation_control.c:17:16:IrrigationControl_ParsePercent	48	static
+irrigation_control.c:48:13:IrrigationControl_ReleaseRelay	8	static
+irrigation_control.c:56:13:IrrigationControl_UseAutoRelay	8	static
+irrigation_control.c:66:13:IrrigationControl_UseManualRelay	8	static
+irrigation_control.c:75:9:IrrigationControl_RequestMeasurement	16	static
+irrigation_control.c:93:6:IrrigationControl_AutoUpdate	24	static
+irrigation_control.c:287:9:IrrigationControl_ProcessCommand	248	static
+irrigation_control.c:455:6:IrrigationControl_ManualSafetyCheck	8	static
+irrigation_control.c:469:9:IrrigationControl_IsActive	16	static
+irrigation_control.c:477:9:IrrigationControl_GetActiveZone	4	static
+irrigation_control.c:486:9:IrrigationControl_GetPhase	4	static
+irrigation_control.c:498:9:IrrigationControl_GetCycle	8	static

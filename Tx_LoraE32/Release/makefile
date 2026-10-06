@@ -16,6 +16,16 @@ RM := rm -rf
 -include Drivers/STM32F1xx_HAL_Driver/Src/subdir.mk
 -include Core/Startup/subdir.mk
 -include Core/Src/subdir.mk
+-include Core/Modules/telemetry_manager/subdir.mk
+-include Core/Modules/system_manager/subdir.mk
+-include Core/Modules/sensor_manager/subdir.mk
+-include Core/Modules/rtos_tasks/subdir.mk
+-include Core/Modules/power_manager/subdir.mk
+-include Core/Modules/lora_communication/subdir.mk
+-include Core/Modules/irrigation_control/subdir.mk
+-include Core/Modules/debug_console/subdir.mk
+-include Core/Lib/battery/subdir.mk
+-include Core/Lib/DHT11/subdir.mk
 -include subdir.mk
 -include objects.mk
 
@@ -39,34 +49,34 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := NCKH
+BUILD_ARTIFACT_NAME := Tx_LoraE32
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-NCKH.elf \
+Tx_LoraE32.elf \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-NCKH.list \
+Tx_LoraE32.list \
 
 OBJCOPY_BIN += \
-NCKH.bin \
+Tx_LoraE32.bin \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: NCKH.elf secondary-outputs
+main-build: Tx_LoraE32.elf secondary-outputs
 
 # Tool invocations
-NCKH.elf: $(OBJS) $(USER_OBJS) D:\STM32CUBEIDE\Tx_LoraE32\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "NCKH.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"D:\STM32CUBEIDE\Tx_LoraE32\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="NCKH.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Tx_LoraE32.elf: $(OBJS) $(USER_OBJS) D:\STM32CUBEIDE\NCKH_ws\Tx_LoraE32\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Tx_LoraE32.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"D:\STM32CUBEIDE\NCKH_ws\Tx_LoraE32\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Tx_LoraE32.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -75,19 +85,19 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-NCKH.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "NCKH.list"
+Tx_LoraE32.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "Tx_LoraE32.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
-NCKH.bin: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objcopy  -O binary $(EXECUTABLES) "NCKH.bin"
+Tx_LoraE32.bin: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objcopy  -O binary $(EXECUTABLES) "Tx_LoraE32.bin"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) $(SIZE_OUTPUT)$(OBJDUMP_LIST)$(EXECUTABLES)$(OBJS)$(S_DEPS)$(S_UPPER_DEPS)$(C_DEPS)$(OBJCOPY_BIN) NCKH.elf
+	-$(RM) $(SIZE_OUTPUT)$(OBJDUMP_LIST)$(EXECUTABLES)$(OBJS)$(S_DEPS)$(S_UPPER_DEPS)$(C_DEPS)$(OBJCOPY_BIN) Tx_LoraE32.elf
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST) $(OBJCOPY_BIN)

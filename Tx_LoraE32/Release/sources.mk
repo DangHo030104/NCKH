@@ -20,6 +20,16 @@ OBJCOPY_BIN :=
 
 # Every subdirectory with source files must be described here
 SUBDIRS := \
+Core/Lib/DHT11 \
+Core/Lib/battery \
+Core/Modules/debug_console \
+Core/Modules/irrigation_control \
+Core/Modules/lora_communication \
+Core/Modules/power_manager \
+Core/Modules/rtos_tasks \
+Core/Modules/sensor_manager \
+Core/Modules/system_manager \
+Core/Modules/telemetry_manager \
 Core/Src \
 Core/Startup \
 Drivers/STM32F1xx_HAL_Driver/Src \
