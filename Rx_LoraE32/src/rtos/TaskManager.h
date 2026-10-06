@@ -7,6 +7,7 @@
 typedef struct
 {
     QueueHandle_t commands;
+    QueueHandle_t commandStatus;
     QueueHandle_t mqttData;
     QueueHandle_t displayData;
 } TaskManager_Queues;

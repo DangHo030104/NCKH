@@ -29,6 +29,7 @@ static uint32_t waitingSeq = 0;
 static String pendingCommandFrame = "";      // Command frame đang được gửi đi, chờ ACK
 static unsigned long loraStateStartedAt = 0; // Lưu thời điểm bắt đầu chờ DATA hoặc ACK
 static uint8_t commandRetryCount = 0;
+static LoRaCommand pendingCommand = {};
 
 /* ACTIVE IRRIGATION TELEMETRY */
 static bool telemetryStreaming = false;
@@ -42,8 +43,23 @@ static const size_t LORA_FRAME_MAX_LENGTH = 191;
 
 /* RTOS QUEUES */
 static QueueHandle_t commandQueue;
+static QueueHandle_t commandStatusQueue;
 static QueueHandle_t mqttDataQueue;
 static QueueHandle_t displayQueue;
+
+static void reportCommandStatus(CommandStatusCode status)
+{
+    CommandStatus report = {};
+    report.status = status;
+    report.command = pendingCommand;
+    report.seq = waitingSeq;
+    report.attempt = commandRetryCount + 1;
+
+    if (xQueueSend(commandStatusQueue, &report, 0) != pdPASS)
+    {
+        Serial.println("[WARN] CommandStatusQueue FULL");
+    }
+}
 
 static void printAuxState(void)
 {
@@ -274,10 +290,13 @@ static void transmitPendingCommandFrame(void)
 
     loraState = WAIT_CMD_ACK;
     loraStateStartedAt = millis();
+
+    reportCommandStatus(commandRetryCount == 0 ? COMMAND_STATUS_SENT : COMMAND_STATUS_RETRYING);
 }
 
 static void sendPendingCommand(const LoRaCommand &cmd)
 {
+    pendingCommand = cmd;
     sequenceNumber++;
 
     if (sequenceNumber == 0)
@@ -294,11 +313,18 @@ static void sendPendingCommand(const LoRaCommand &cmd)
         pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + ",MODE=" +
                               String(cmd.mode == MODE_AUTO ? "AUTO" : "MANUAL") + ">";
     }
-    else
+    else if (cmd.type == COMMAND_IRRIGATION)
     {
         /* STM32 accepts: <CMD,SEQ=x,ZONE=1|2,IRR=ON|OFF> */
         pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + ",ZONE=" +
                               String(cmd.zone) + ",IRR=" + String(cmd.irr ? "ON" : "OFF") + ">";
+    }
+    else
+    {
+        /* STM32 accepts: <CMD,SEQ=x,THR,ZONE=1|2,START=xx.x,STOP=yy.y> */
+        pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + ",THR,ZONE=" +
+                              String(cmd.zone) + ",START=" + String(cmd.startThreshold, 1) +
+                              ",STOP=" + String(cmd.stopThreshold, 1) + ">";
     }
 
     commandRetryCount = 0;
@@ -312,6 +338,8 @@ static void handleAckFrame(const String &frame)
     if (loraState == WAIT_CMD_ACK && receivedSeq == waitingSeq)
     {
         Serial.println("ACK MATCH -> COMMAND SUCCESS");
+
+        reportCommandStatus(COMMAND_STATUS_SUCCESS);
 
         pendingCommandFrame = "";
         commandRetryCount = 0;
@@ -467,12 +495,29 @@ static void handleLoraTimeouts(void)
 
         if (commandRetryCount < MAX_CMD_RETRIES)
         {
+            if (pendingCommand.type == COMMAND_IRRIGATION &&
+                pendingCommand.revision < readLatestZoneCommand(pendingCommand.zone))
+            {
+                Serial.println("\n[LORA] Newer zone command -> cancel retry of stale command");
+                reportCommandStatus(COMMAND_STATUS_FAILED);
+                pendingCommandFrame = "";
+                commandRetryCount = 0;
+                loraState = LORA_IDLE;
+                return;
+            }
+
             Serial.println("\nACK TIMEOUT -> RETRY COMMAND");
-            transmitPendingCommandFrame();
+            
+            /* Telemetry STM32 phát theo chu kỳ 1s. 
+             * Thêm độ lệch ngẫu nhiên 80–280 ms khi retry để tránh xung đột với telemetry.*/
+             vTaskDelay(pdMS_TO_TICKS(random(CMD_RETRY_JITTER_MIN_MS, CMD_RETRY_JITTER_MAX_MS + 1)));
+            
+             transmitPendingCommandFrame();
         }
         else
         {
             Serial.println("\nCOMMAND FAILED -> MAX RETRIES REACHED");
+            reportCommandStatus(COMMAND_STATUS_FAILED);
             pendingCommandFrame = "";
             commandRetryCount = 0;
 
@@ -481,9 +526,11 @@ static void handleLoraTimeouts(void)
     }
 }
 
-void LoRaManager_Begin(QueueHandle_t commands, QueueHandle_t mqttData, QueueHandle_t displayData)
+void LoRaManager_Begin(QueueHandle_t commands, QueueHandle_t commandStatus,
+                       QueueHandle_t mqttData, QueueHandle_t displayData)
 {
     commandQueue = commands;
+    commandStatusQueue = commandStatus;
     mqttDataQueue = mqttData;
     displayQueue = displayData;
     /* LoRa E32 */
@@ -508,6 +555,14 @@ void LoRaManager_Run(void *pvParameters)
         /* TIMEOUT  */
         handleLoraTimeouts();
 
+        /* Lệnh điều khiển ưu tiên hơn REQ sensor đang chờ DATA. DATA đến muộn
+         * sẽ bị loại bằng SEQ sau khi CMD mới đã được gửi. */
+        if (loraState == WAIT_DATA && uxQueueMessagesWaiting(commandQueue) > 0)
+        {
+            Serial.println("[LORA] Pending CMD -> cancel WAIT_DATA");
+            loraState = LORA_IDLE;
+        }
+
         if (telemetryStreaming && millis() - lastTelemetryAt >= TELEMETRY_TIMEOUT_MS)
         {
             telemetryStreaming = false;
@@ -520,7 +575,15 @@ void LoRaManager_Run(void *pvParameters)
             /* CMD ưu tiên hơn polling */
             if (xQueueReceive(commandQueue, &cmd, 0) == pdPASS)
             {
-                sendPendingCommand(cmd);
+                if (cmd.type == COMMAND_IRRIGATION && cmd.zone >= 1 && cmd.zone <= 2 &&
+                    cmd.revision < readLatestZoneCommand(cmd.zone))
+                {
+                    Serial.println("[LORA] Stale zone command skipped");
+                }
+                else
+                {
+                    sendPendingCommand(cmd);
+                }
             }
 
             /* Không có CMD -> Polling sensor */

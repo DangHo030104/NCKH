@@ -16,7 +16,26 @@ static unsigned long lastMqttReconnectAttempt = 0;
 
 /* RTOS QUEUES */
 static QueueHandle_t commandQueue;
+static QueueHandle_t commandStatusQueue;
 static QueueHandle_t mqttDataQueue;
+
+static bool enqueueCommand(const LoRaCommand &cmd, bool highPriority)
+{
+    BaseType_t queued = highPriority
+        ? xQueueSendToFront(commandQueue, &cmd, 0)
+        : xQueueSendToBack(commandQueue, &cmd, 0);
+
+    CommandStatus report = {};
+    report.command = cmd;
+    report.status = queued == pdPASS ? COMMAND_STATUS_QUEUED : COMMAND_STATUS_FAILED;
+
+    if (xQueueSend(commandStatusQueue, &report, 0) != pdPASS)
+    {
+        Serial.println("[WARN] CommandStatusQueue FULL");
+    }
+
+    return queued == pdPASS;
+}
 
 /* MQTT Client tự gọi hàm này khi nhận message từ MQTT Server */
 static void mqttCallback(char *topic, byte *payload, unsigned int length)
@@ -46,6 +65,40 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
         return;
     }
 
+    /* Irrigation threshold command from Web:
+     * {"cmd":"set_irrigation_threshold","zone":1,"start":35,"stop":55} */
+    const char *commandName = doc["cmd"];
+    if (commandName != nullptr && strcmp(commandName, "set_irrigation_threshold") == 0)
+    {
+        const int zone = doc["zone"] | 0;
+        const float startThreshold = doc["start"] | -1.0f;
+        const float stopThreshold = doc["stop"] | -1.0f;
+
+        if ((zone != 1 && zone != 2) || startThreshold < 0.0f ||
+            stopThreshold > 100.0f || startThreshold >= stopThreshold)
+        {
+            Serial.println("[ERROR] Invalid irrigation threshold command");
+            return;
+        }
+
+        LoRaCommand thresholdCommand = {};
+        thresholdCommand.type = COMMAND_THRESHOLD;
+        thresholdCommand.zone = (uint8_t)zone;
+        thresholdCommand.startThreshold = startThreshold;
+        thresholdCommand.stopThreshold = stopThreshold;
+
+        if (enqueueCommand(thresholdCommand, false))
+        {
+            Serial.printf("[MQTT] Threshold queued: ZONE=%d START=%.1f STOP=%.1f\n",
+                          zone, startThreshold, stopThreshold);
+        }
+        else
+        {
+            Serial.println("[ERROR] CommandQueue FULL");
+        }
+        return;
+    }
+
     /* MODE command: {"mode":"AUTO"} or {"mode":"MANUAL"} */
     const char *mode = doc["mode"]; // Lấy trường mode (AUTO hoặc MANUAL)
 
@@ -69,7 +122,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
             return;
         }
 
-        if (xQueueSend(commandQueue, &modeCommand, 0) == pdPASS)
+        if (enqueueCommand(modeCommand, false))
         {
             Serial.print("[MQTT] CMD queued: MODE=");
             Serial.println(mode);
@@ -96,6 +149,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
     LoRaCommand cmd = {};
     cmd.type = COMMAND_IRRIGATION;
     cmd.zone = relay;
+    cmd.revision = nextZoneCommand(relay);
 
     if (strcmp(state, "ON") == 0)
     {
@@ -113,7 +167,11 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
     }
 
     /* Gửi command sang LoRaTask */
-    if (xQueueSend(commandQueue, &cmd, 0) == pdPASS)
+    /* OFF được đưa lên đầu hàng đợi. revision giúp LoRaTask bỏ lệnh ON cũ
+     * còn nằm phía sau, tránh van bị bật lại sau khi người dùng vừa tắt. */
+    LoRaCommand queueHead = {};
+    bool modeMustRunFirst = xQueuePeek(commandQueue, &queueHead, 0) == pdPASS && queueHead.type == COMMAND_MODE;
+    if (enqueueCommand(cmd, !cmd.irr && !modeMustRunFirst))
     {
         Serial.print("[MQTT] CMD queued: ZONE=");
         Serial.print(cmd.zone);
@@ -198,9 +256,50 @@ static void publishData(const SensorData &data)
     Serial.println(result ? "SUCCESS" : "FAILED");
 }
 
-void MQTTManager_Begin(QueueHandle_t commands, QueueHandle_t mqttData)
+static bool publishCommandStatus(const CommandStatus &report)
+{
+    static const char *statusNames[] = {"QUEUED", "SENT", "RETRYING", "SUCCESS", "FAILED"};
+    JsonDocument doc;
+
+    doc["status"] = statusNames[report.status];
+    doc["seq"] = report.seq;
+    doc["attempt"] = report.attempt;
+
+    if (report.command.type == COMMAND_MODE)
+    {
+        doc["type"] = "MODE";
+        doc["mode"] = report.command.mode == MODE_AUTO ? "AUTO" : "MANUAL";
+    }
+    else if (report.command.type == COMMAND_IRRIGATION)
+    {
+        doc["type"] = "IRRIGATION";
+        doc["zone"] = report.command.zone;
+        doc["state"] = report.command.irr ? "ON" : "OFF";
+        doc["revision"] = report.command.revision;
+    }
+    else
+    {
+        doc["type"] = "THRESHOLD";
+        doc["zone"] = report.command.zone;
+        doc["start"] = report.command.startThreshold;
+        doc["stop"] = report.command.stopThreshold;
+    }
+
+    char payload[192];
+    serializeJson(doc, payload, sizeof(payload));
+    bool result = mqttClient.publish(command_status_topic, payload);
+
+    Serial.print("[MQTT] CMD status: ");
+    Serial.print(payload);
+    Serial.print(" | ");
+    Serial.println(result ? "SUCCESS" : "FAILED");
+    return result;
+}
+
+void MQTTManager_Begin(QueueHandle_t commands, QueueHandle_t commandStatus, QueueHandle_t mqttData)
 {
     commandQueue = commands;
+    commandStatusQueue = commandStatus;
     mqttDataQueue = mqttData;
     /* MQTT */
     secureClient.setInsecure();                   // Bỏ kiểm tra CA, TLS vẫn mã hóa
@@ -213,6 +312,7 @@ void MQTTManager_Run(void *pvParameters)
     Serial.println("[RTOS] MQTTTask started");
 
     SensorData data;
+    CommandStatus commandStatus;
 
     for (;;)
     {
@@ -242,6 +342,16 @@ void MQTTManager_Run(void *pvParameters)
             {
                 /* Duy trì MQTT connection */
                 mqttClient.loop();
+
+                /* Phản hồi CMD có ưu tiên cao hơn telemetry. */
+                while (xQueueReceive(commandStatusQueue, &commandStatus, 0) == pdPASS)
+                {
+                    if (!publishCommandStatus(commandStatus))
+                    {
+                        (void)xQueueSendToFront(commandStatusQueue, &commandStatus, 0);
+                        break;
+                    }
+                }
 
                 /* Có sensor data mới? */
                 if (xQueueReceive(mqttDataQueue, &data, 0) == pdPASS)

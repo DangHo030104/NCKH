@@ -24,9 +24,9 @@ void SystemManager_Begin(void)
     }
 
     DisplayManager_Begin(queues.displayData);
-    LoRaManager_Begin(queues.commands, queues.mqttData, queues.displayData);
+    LoRaManager_Begin(queues.commands, queues.commandStatus, queues.mqttData, queues.displayData);
     WiFiManager_Begin();
-    MQTTManager_Begin(queues.commands, queues.mqttData);
+    MQTTManager_Begin(queues.commands, queues.commandStatus, queues.mqttData);
     randomSeed(millis());
 
     if (!TaskManager_StartTasks())

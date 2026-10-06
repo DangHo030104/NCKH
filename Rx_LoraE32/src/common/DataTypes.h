@@ -42,7 +42,8 @@ typedef enum
 typedef enum
 {
     COMMAND_IRRIGATION,
-    COMMAND_MODE
+    COMMAND_MODE,
+    COMMAND_THRESHOLD
 } LoRaCommandType;
 
 typedef struct
@@ -51,7 +52,28 @@ typedef struct
     uint8_t zone;
     bool irr;
     IrrigationMode mode;
+    uint32_t revision;      // Mỗi lệnh ON/OFF van của 1 zone sẽ có số phiên bản tăng dần.
+    float startThreshold;
+    float stopThreshold;
 } LoRaCommand;
+
+// Phản hồi trạng thái lệnh từ LoRaTask sang MQTTTask để publish lên Web. Chứa cả lệnh gốc để Web biết lệnh nào đang được phản hồi.
+typedef enum
+{
+    COMMAND_STATUS_QUEUED,
+    COMMAND_STATUS_SENT,
+    COMMAND_STATUS_RETRYING,
+    COMMAND_STATUS_SUCCESS,
+    COMMAND_STATUS_FAILED
+} CommandStatusCode;
+
+typedef struct
+{
+    CommandStatusCode status;
+    LoRaCommand command;
+    uint32_t seq;
+    uint8_t attempt;
+} CommandStatus;
 
 typedef struct
 {
