@@ -74,7 +74,7 @@
 #define TELEMETRY_INTERVAL_MS 	1000U     /* Yêu cầu snapshot mới mỗi 1 giây khi đang tưới. */
 #define TELEMETRY_TX_GUARD_MS 	1000U     /* Không cho STM32 gửi telemetry quá gần một gói DATA hoặc ACK vừa gửi
 										   * -> Ngăn hai frame LoRa bị dính vào nhau. */
-#define LORA_RX_TO_TX_GUARD_MS  30U       /* Giữ đường truyền yên lặng sau byte RX cuối trước khi phát telemetry. */
+#define LORA_RX_TO_TX_GUARD_MS  30U       /* Giữ đường truyền ổn định sau byte RX cuối trước khi phát telemetry */
 
 /* Đặt bằng 1 để không vào STOP khi debug bằng CubeIDE. */
 #define DEBUG_NO_STOP 0

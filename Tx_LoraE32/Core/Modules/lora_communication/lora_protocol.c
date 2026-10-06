@@ -35,7 +35,7 @@ static void LoRaProtocol_SendAck(uint32_t sequence)
     last_lora_tx_tick = HAL_GetTick();
 
     /* Chờ E32 phát RF hoàn tất trước khi Task tiếp tục. */
-    (void)LoRaE32_WaitReady(500U);
+    LoRaE32_WaitReady(500U);
 }
 
 static void LoRaProtocol_SendData(uint32_t sequence)
@@ -135,6 +135,7 @@ static void LoRaProtocol_ProcessCommand(char *frame)
         last_command_valid = 1;
         strncpy(last_command, frame, sizeof(last_command) - 1U);
         last_command[sizeof(last_command) - 1U] = '\0';
+
         LoRaProtocol_SendAck(seq);
     }
     else if (flags & CONTROL_ERROR_SIGNAL)
@@ -180,5 +181,5 @@ void LoRaProtocol_SendTelemetry(void)
     HAL_UART_Transmit(&huart1, (uint8_t *)frame, strlen(frame), 500U);
     last_lora_tx_tick = HAL_GetTick();
 
-    (void)LoRaE32_WaitReady(500U);
+    LoRaE32_WaitReady(500U);
 }

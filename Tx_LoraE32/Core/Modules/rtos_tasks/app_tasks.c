@@ -97,7 +97,7 @@ void AppTasks_RunLoRa(void *argument)
             /* RTC chỉ kích hoạt phép đo mới khi AUTO vẫn đang IDLE. */
             if (irr_mode == MODE_AUTO && irr_state == IRR_IDLE)
             {
-                (void)IrrigationControl_RequestMeasurement();
+                IrrigationControl_RequestMeasurement();
             }
 
             wake_source = WAKE_NONE;
@@ -147,13 +147,13 @@ void AppTasks_RunSensor(void *argument)
 
         /* REQ từ LoRaTask: báo DATA có thể được tạo. */
         if (signals & SENSOR_READ_SIGNAL)
-        	(void)osThreadFlagsSet(LoRaTaskHandle, SENSOR_READY_SIGNAL);
+        	osThreadFlagsSet(LoRaTaskHandle, SENSOR_READY_SIGNAL);
 
-        /* AUTO FSM: xóa pending và báo IrrigationTask phép đo đã hoàn tất. */
+        /* AUTO FSM: xóa pending và báo IrrigationTask đo đã hoàn tất. */
         if (signals & IRRIGATION_READ_SIGNAL)
         {
             irr_measure_pending = 0;
-            (void)osThreadFlagsSet(IrrigationTaskHandle, IRRIGATION_READY_SIGNAL);
+            osThreadFlagsSet(IrrigationTaskHandle, IRRIGATION_READY_SIGNAL);
         }
 
         /* Streaming: publish snapshot mới cho TelemetryManager. */
@@ -179,7 +179,7 @@ void AppTasks_RunIrrigation(void *argument)
         if ((flags & osFlagsError) == 0 && (flags & CONTROL_EXEC_SIGNAL))
         {
             uint8_t result = IrrigationControl_ProcessCommand();
-            (void)osThreadFlagsSet(LoRaTaskHandle, result ? CONTROL_OK_SIGNAL : CONTROL_ERROR_SIGNAL);
+            osThreadFlagsSet(LoRaTaskHandle, result ? CONTROL_OK_SIGNAL : CONTROL_ERROR_SIGNAL);
         }
 
         /* 2. Nhận thông báo SensorTask đã hoàn tất phép đo cho AUTO. */

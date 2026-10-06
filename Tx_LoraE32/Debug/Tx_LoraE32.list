@@ -37,13 +37,13 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, READONLY, DEBUGGING, OCTETS
  16 .debug_macro  0001e197  00000000  00000000  00055330  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 17 .debug_line   00020746  00000000  00000000  000734c7  2**0
+ 17 .debug_line   000206fb  00000000  00000000  000734c7  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    0009d41f  00000000  00000000  00093c0d  2**0
+ 18 .debug_str    0009d41f  00000000  00000000  00093bc2  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000053  00000000  00000000  0013102c  2**0
+ 19 .comment      00000053  00000000  00000000  00130fe1  2**0
                   CONTENTS, READONLY
- 20 .debug_frame  000078b8  00000000  00000000  00131080  2**2
+ 20 .debug_frame  000078b8  00000000  00000000  00131034  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
 
 Disassembly of section .text:
@@ -2398,26 +2398,27 @@ static uint8_t IrrigationControl_ParsePercent(const char *text, char delimiter, 
  800172c:	460b      	mov	r3, r1
  800172e:	607a      	str	r2, [r7, #4]
  8001730:	72fb      	strb	r3, [r7, #11]
-    uint32_t whole = 0U;
+    uint32_t whole = 0;    // Phần nguyên
  8001732:	2300      	movs	r3, #0
  8001734:	61fb      	str	r3, [r7, #28]
-    uint32_t fraction = 0U;
+    uint32_t fraction = 0; // Phần thập phân
  8001736:	2300      	movs	r3, #0
  8001738:	61bb      	str	r3, [r7, #24]
-    uint32_t divisor = 1U;
+    uint32_t divisor = 1;  // Hệ số chia để tính phần thập phân
  800173a:	2301      	movs	r3, #1
  800173c:	617b      	str	r3, [r7, #20]
-    uint8_t has_digit = 0U;
+    uint8_t has_digit = 0; // Flag: kiểm tra có ít nhất một chữ số hợp lệ hay không
  800173e:	2300      	movs	r3, #0
  8001740:	74fb      	strb	r3, [r7, #19]
 
+    // Xử lý phần nguyên
     while (*text >= '0' && *text <= '9')
  8001742:	e00f      	b.n	8001764 <IrrigationControl_ParsePercent+0x40>
     {
-        has_digit = 1U;
+        has_digit = 1;
  8001744:	2301      	movs	r3, #1
  8001746:	74fb      	strb	r3, [r7, #19]
-        whole = whole * 10U + (uint32_t)(*text - '0');
+        whole = whole * 10 + (uint32_t)(*text - '0'); // Chuyển ký tự thành số và cộng vào phần nguyên
  8001748:	69fa      	ldr	r2, [r7, #28]
  800174a:	4613      	mov	r3, r2
  800174c:	009b      	lsls	r3, r3, #2
@@ -2444,6 +2445,7 @@ static uint8_t IrrigationControl_ParsePercent(const char *text, char delimiter, 
  8001772:	d9e7      	bls.n	8001744 <IrrigationControl_ParsePercent+0x20>
     }
 
+    // Xử lý phần thập phân nếu có
     if (*text == '.')
  8001774:	68fb      	ldr	r3, [r7, #12]
  8001776:	781b      	ldrb	r3, [r3, #0]
@@ -2457,10 +2459,10 @@ static uint8_t IrrigationControl_ParsePercent(const char *text, char delimiter, 
         while (*text >= '0' && *text <= '9')
  8001782:	e015      	b.n	80017b0 <IrrigationControl_ParsePercent+0x8c>
         {
-            has_digit = 1U;
+            has_digit = 1;
  8001784:	2301      	movs	r3, #1
  8001786:	74fb      	strb	r3, [r7, #19]
-            fraction = fraction * 10U + (uint32_t)(*text - '0');
+            fraction = fraction * 10 + (uint32_t)(*text - '0'); // Chuyển ký tự thành số và cộng vào phần thập phân
  8001788:	69ba      	ldr	r2, [r7, #24]
  800178a:	4613      	mov	r3, r2
  800178c:	009b      	lsls	r3, r3, #2
@@ -2472,7 +2474,7 @@ static uint8_t IrrigationControl_ParsePercent(const char *text, char delimiter, 
  8001798:	4413      	add	r3, r2
  800179a:	3b30      	subs	r3, #48	; 0x30
  800179c:	61bb      	str	r3, [r7, #24]
-            divisor *= 10U;
+            divisor *= 10;                                      // Cập nhật hệ số chia để tính phần thập phân
  800179e:	697a      	ldr	r2, [r7, #20]
  80017a0:	4613      	mov	r3, r2
  80017a2:	009b      	lsls	r3, r3, #2
@@ -2495,7 +2497,8 @@ static uint8_t IrrigationControl_ParsePercent(const char *text, char delimiter, 
         }
     }
 
-    if (!has_digit || *text != delimiter || divisor == 0U) return 0U;
+    // Kiểm tra điều kiện hợp lệ: có ít nhất một chữ số, ký tự tiếp theo là dấu phân cách và hệ số chia khác 0
+    if (!has_digit || *text != delimiter || divisor == 0)
  80017c0:	7cfb      	ldrb	r3, [r7, #19]
  80017c2:	2b00      	cmp	r3, #0
  80017c4:	d007      	beq.n	80017d6 <IrrigationControl_ParsePercent+0xb2>
@@ -2507,8 +2510,11 @@ static uint8_t IrrigationControl_ParsePercent(const char *text, char delimiter, 
  80017d0:	697b      	ldr	r3, [r7, #20]
  80017d2:	2b00      	cmp	r3, #0
  80017d4:	d101      	bne.n	80017da <IrrigationControl_ParsePercent+0xb6>
+        return 0;
  80017d6:	2300      	movs	r3, #0
  80017d8:	e019      	b.n	800180e <IrrigationControl_ParsePercent+0xea>
+
+    // Tính giá trị phần trăm cuối cùng
     *value = (float)whole + ((float)fraction / (float)divisor);
  80017da:	69f8      	ldr	r0, [r7, #28]
  80017dc:	f7ff fa14 	bl	8000c08 <__aeabi_ui2f>
@@ -2530,7 +2536,7 @@ static uint8_t IrrigationControl_ParsePercent(const char *text, char delimiter, 
  8001806:	461a      	mov	r2, r3
  8001808:	687b      	ldr	r3, [r7, #4]
  800180a:	601a      	str	r2, [r3, #0]
-    return 1U;
+    return 1;
  800180c:	2301      	movs	r3, #1
 }
  800180e:	4618      	mov	r0, r3
@@ -2683,7 +2689,7 @@ void IrrigationControl_AutoUpdate(void)
  80018e6:	b083      	sub	sp, #12
  80018e8:	af00      	add	r7, sp, #0
     /* MANUAL luôn có quyền ưu tiên đối với relay. */
-    if (relay_owner == RELAY_OWNER_MANUAL || irr_mode != MODE_AUTO) return;
+    if (relay_owner == RELAY_OWNER_MANUAL || irr_mode != MODE_AUTO)
  80018ea:	4bb1      	ldr	r3, [pc, #708]	; (8001bb0 <IrrigationControl_AutoUpdate+0x2cc>)
  80018ec:	781b      	ldrb	r3, [r3, #0]
  80018ee:	b2db      	uxtb	r3, r3
@@ -2694,6 +2700,7 @@ void IrrigationControl_AutoUpdate(void)
  80018fa:	b2db      	uxtb	r3, r3
  80018fc:	2b01      	cmp	r3, #1
  80018fe:	f040 81fe 	bne.w	8001cfe <IrrigationControl_AutoUpdate+0x41a>
+        return;
 
     /* Sau khi STM32 reboot hoặc vừa chuyển lại AUTO, không được quyết định tưới
      * bằng dữ liệu sensor cũ/chưa hợp lệ. */
@@ -2704,12 +2711,13 @@ void IrrigationControl_AutoUpdate(void)
  8001908:	2b00      	cmp	r3, #0
  800190a:	d108      	bne.n	800191e <IrrigationControl_AutoUpdate+0x3a>
     {
-        if (!irr_measure_pending) (void)IrrigationControl_RequestMeasurement();
+        if (!irr_measure_pending)
  800190c:	4bab      	ldr	r3, [pc, #684]	; (8001bbc <IrrigationControl_AutoUpdate+0x2d8>)
  800190e:	781b      	ldrb	r3, [r3, #0]
  8001910:	b2db      	uxtb	r3, r3
  8001912:	2b00      	cmp	r3, #0
  8001914:	f040 81f5 	bne.w	8001d02 <IrrigationControl_AutoUpdate+0x41e>
+            IrrigationControl_RequestMeasurement();
  8001918:	f7ff ffbc 	bl	8001894 <IrrigationControl_RequestMeasurement>
         return;
  800191c:	e1f1      	b.n	8001d02 <IrrigationControl_AutoUpdate+0x41e>
@@ -2742,7 +2750,7 @@ void IrrigationControl_AutoUpdate(void)
  8001946:	4b9c      	ldr	r3, [pc, #624]	; (8001bb8 <IrrigationControl_AutoUpdate+0x2d4>)
  8001948:	2200      	movs	r2, #0
  800194a:	701a      	strb	r2, [r3, #0]
-        (void)IrrigationControl_RequestMeasurement();
+        IrrigationControl_RequestMeasurement();
  800194c:	f7ff ffa2 	bl	8001894 <IrrigationControl_RequestMeasurement>
         return;
  8001950:	e1e8      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
@@ -2764,12 +2772,12 @@ void IrrigationControl_AutoUpdate(void)
  8001978:	08001c05 	.word	0x08001c05
  800197c:	08001c4d 	.word	0x08001c4d
  8001980:	08001d07 	.word	0x08001d07
-        /* =====================================
-         * IDLE - CHỌN ZONE CẦN TƯỚI
-         * ===================================== */
-        case IRR_IDLE:
-        {
-            uint8_t zone1_dry = sm1 < soil_start_threshold[0];
+    /* =====================================
+     * IDLE - CHỌN ZONE CẦN TƯỚI
+     * ===================================== */
+    case IRR_IDLE:
+    {
+        uint8_t zone1_dry = sm1 < soil_start_threshold[0];
  8001984:	4b90      	ldr	r3, [pc, #576]	; (8001bc8 <IrrigationControl_AutoUpdate+0x2e4>)
  8001986:	681b      	ldr	r3, [r3, #0]
  8001988:	4a90      	ldr	r2, [pc, #576]	; (8001bcc <IrrigationControl_AutoUpdate+0x2e8>)
@@ -2786,7 +2794,7 @@ void IrrigationControl_AutoUpdate(void)
  80019a0:	461c      	mov	r4, r3
  80019a2:	b2e3      	uxtb	r3, r4
  80019a4:	71fb      	strb	r3, [r7, #7]
-            uint8_t zone2_dry = sm2 < soil_start_threshold[1];
+        uint8_t zone2_dry = sm2 < soil_start_threshold[1];
  80019a6:	4b88      	ldr	r3, [pc, #544]	; (8001bc8 <IrrigationControl_AutoUpdate+0x2e4>)
  80019a8:	685b      	ldr	r3, [r3, #4]
  80019aa:	4a89      	ldr	r2, [pc, #548]	; (8001bd0 <IrrigationControl_AutoUpdate+0x2ec>)
@@ -2804,16 +2812,16 @@ void IrrigationControl_AutoUpdate(void)
  80019c4:	b2e3      	uxtb	r3, r4
  80019c6:	71bb      	strb	r3, [r7, #6]
 
-            /* Không zone nào khô: bảo đảm toàn bộ relay đã OFF. */
-            if (!zone1_dry && !zone2_dry)
+        /* Không zone nào khô: bảo đảm toàn bộ relay đã OFF. */
+        if (!zone1_dry && !zone2_dry)
  80019c8:	79fb      	ldrb	r3, [r7, #7]
  80019ca:	2b00      	cmp	r3, #0
  80019cc:	d117      	bne.n	80019fe <IrrigationControl_AutoUpdate+0x11a>
  80019ce:	79bb      	ldrb	r3, [r7, #6]
  80019d0:	2b00      	cmp	r3, #0
  80019d2:	d114      	bne.n	80019fe <IrrigationControl_AutoUpdate+0x11a>
-            {
-                if (relay_owner != RELAY_OWNER_NONE || valve1_state != VALVE_OFF || valve2_state != VALVE_OFF)
+        {
+            if (relay_owner != RELAY_OWNER_NONE || valve1_state != VALVE_OFF || valve2_state != VALVE_OFF)
  80019d4:	4b76      	ldr	r3, [pc, #472]	; (8001bb0 <IrrigationControl_AutoUpdate+0x2cc>)
  80019d6:	781b      	ldrb	r3, [r3, #0]
  80019d8:	b2db      	uxtb	r3, r3
@@ -2829,25 +2837,25 @@ void IrrigationControl_AutoUpdate(void)
  80019ec:	b2db      	uxtb	r3, r3
  80019ee:	2b00      	cmp	r3, #0
  80019f0:	f000 818b 	beq.w	8001d0a <IrrigationControl_AutoUpdate+0x426>
-                {
-                    RelayDriver_StopAll();
+            {
+                RelayDriver_StopAll();
  80019f4:	f000 fd74 	bl	80024e0 <RelayDriver_StopAll>
-                    IrrigationControl_ReleaseRelay();
+                IrrigationControl_ReleaseRelay();
  80019f8:	f7ff ff0e 	bl	8001818 <IrrigationControl_ReleaseRelay>
-                }
-                return;
- 80019fc:	e185      	b.n	8001d0a <IrrigationControl_AutoUpdate+0x426>
             }
+            return;
+ 80019fc:	e185      	b.n	8001d0a <IrrigationControl_AutoUpdate+0x426>
+        }
 
-            /* Nếu cả hai zone cùng khô, ưu tiên zone có độ ẩm thấp hơn. */
-            IrrigationControl_UseAutoRelay();
+        /* Nếu cả hai zone cùng khô, ưu tiên zone có độ ẩm thấp hơn. */
+        IrrigationControl_UseAutoRelay();
  80019fe:	f7ff ff1f 	bl	8001840 <IrrigationControl_UseAutoRelay>
-            irr_state_start = HAL_GetTick();
+        irr_state_start = HAL_GetTick();
  8001a02:	f002 fc3d 	bl	8004280 <HAL_GetTick>
  8001a06:	4603      	mov	r3, r0
  8001a08:	4a74      	ldr	r2, [pc, #464]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
  8001a0a:	6013      	str	r3, [r2, #0]
-            if (zone1_dry && (!zone2_dry || sm1 <= sm2))
+        if (zone1_dry && (!zone2_dry || sm1 <= sm2))
  8001a0c:	79fb      	ldrb	r3, [r7, #7]
  8001a0e:	2b00      	cmp	r3, #0
  8001a10:	d01c      	beq.n	8001a4c <IrrigationControl_AutoUpdate+0x168>
@@ -2864,8 +2872,8 @@ void IrrigationControl_AutoUpdate(void)
  8001a28:	4603      	mov	r3, r0
  8001a2a:	2b00      	cmp	r3, #0
  8001a2c:	d00e      	beq.n	8001a4c <IrrigationControl_AutoUpdate+0x168>
-            {
-                DebugConsole_Print(zone2_dry ? "[AUTO] Both dry -> Zone1 first\r\n" : "[AUTO] Select Zone1\r\n");
+        {
+            DebugConsole_Print(zone2_dry ? "[AUTO] Both dry -> Zone1 first\r\n" : "[AUTO] Select Zone1\r\n");
  8001a2e:	79bb      	ldrb	r3, [r7, #6]
  8001a30:	2b00      	cmp	r3, #0
  8001a32:	d001      	beq.n	8001a38 <IrrigationControl_AutoUpdate+0x154>
@@ -2874,20 +2882,20 @@ void IrrigationControl_AutoUpdate(void)
  8001a38:	4b6a      	ldr	r3, [pc, #424]	; (8001be4 <IrrigationControl_AutoUpdate+0x300>)
  8001a3a:	4618      	mov	r0, r3
  8001a3c:	f7ff fe5a 	bl	80016f4 <DebugConsole_Print>
-                irr_state = IRR_ZONE1_WATERING;
+            irr_state = IRR_ZONE1_WATERING;
  8001a40:	4b5f      	ldr	r3, [pc, #380]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001a42:	2201      	movs	r2, #1
  8001a44:	701a      	strb	r2, [r3, #0]
-                RelayDriver_StartZone1();
+            RelayDriver_StartZone1();
  8001a46:	f000 fcd7 	bl	80023f8 <RelayDriver_StartZone1>
-            {
-                DebugConsole_Print(zone1_dry ? "[AUTO] Both dry -> Zone2 first\r\n" : "[AUTO] Select Zone2\r\n");
-                irr_state = IRR_ZONE2_WATERING;
-                RelayDriver_StartZone2();
-            }
-            return;
+        {
+            DebugConsole_Print(zone1_dry ? "[AUTO] Both dry -> Zone2 first\r\n" : "[AUTO] Select Zone2\r\n");
+            irr_state = IRR_ZONE2_WATERING;
+            RelayDriver_StartZone2();
+        }
+        return;
  8001a4a:	e16b      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-                DebugConsole_Print(zone1_dry ? "[AUTO] Both dry -> Zone2 first\r\n" : "[AUTO] Select Zone2\r\n");
+            DebugConsole_Print(zone1_dry ? "[AUTO] Both dry -> Zone2 first\r\n" : "[AUTO] Select Zone2\r\n");
  8001a4c:	79fb      	ldrb	r3, [r7, #7]
  8001a4e:	2b00      	cmp	r3, #0
  8001a50:	d001      	beq.n	8001a56 <IrrigationControl_AutoUpdate+0x172>
@@ -2896,19 +2904,19 @@ void IrrigationControl_AutoUpdate(void)
  8001a56:	4b65      	ldr	r3, [pc, #404]	; (8001bec <IrrigationControl_AutoUpdate+0x308>)
  8001a58:	4618      	mov	r0, r3
  8001a5a:	f7ff fe4b 	bl	80016f4 <DebugConsole_Print>
-                irr_state = IRR_ZONE2_WATERING;
+            irr_state = IRR_ZONE2_WATERING;
  8001a5e:	4b58      	ldr	r3, [pc, #352]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001a60:	2204      	movs	r2, #4
  8001a62:	701a      	strb	r2, [r3, #0]
-                RelayDriver_StartZone2();
+            RelayDriver_StartZone2();
  8001a64:	f000 fd02 	bl	800246c <RelayDriver_StartZone2>
-            return;
+        return;
  8001a68:	e15c      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-        }
+    }
 
-        case IRR_ZONE1_WATERING:
-            /* Kết thúc xung tưới Zone 1 rồi chuyển sang thời gian nghỉ thấm. */
-            if ((HAL_GetTick() - irr_state_start) >= WATER_PULSE_MS)
+    case IRR_ZONE1_WATERING:
+        /* Kết thúc xung tưới Zone 1 rồi chuyển sang thời gian nghỉ thấm. */
+        if ((HAL_GetTick() - irr_state_start) >= WATER_PULSE_MS)
  8001a6a:	f002 fc09 	bl	8004280 <HAL_GetTick>
  8001a6e:	4602      	mov	r2, r0
  8001a70:	4b5a      	ldr	r3, [pc, #360]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
@@ -2917,31 +2925,31 @@ void IrrigationControl_AutoUpdate(void)
  8001a76:	f241 3287 	movw	r2, #4999	; 0x1387
  8001a7a:	4293      	cmp	r3, r2
  8001a7c:	f240 8147 	bls.w	8001d0e <IrrigationControl_AutoUpdate+0x42a>
-            {
-                RelayDriver_StopCurrent(RELAY_OWNER_AUTO);
+        {
+            RelayDriver_StopCurrent(RELAY_OWNER_AUTO);
  8001a80:	2002      	movs	r0, #2
  8001a82:	f000 fd63 	bl	800254c <RelayDriver_StopCurrent>
-                irr_state = IRR_ZONE1_SOAK;
+            irr_state = IRR_ZONE1_SOAK;
  8001a86:	4b4e      	ldr	r3, [pc, #312]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001a88:	2202      	movs	r2, #2
  8001a8a:	701a      	strb	r2, [r3, #0]
-                irr_state_start = HAL_GetTick();
+            irr_state_start = HAL_GetTick();
  8001a8c:	f002 fbf8 	bl	8004280 <HAL_GetTick>
  8001a90:	4603      	mov	r3, r0
  8001a92:	4a52      	ldr	r2, [pc, #328]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
  8001a94:	6013      	str	r3, [r2, #0]
-                telemetry_event_pending = 1;
+            telemetry_event_pending = 1;
  8001a96:	4b56      	ldr	r3, [pc, #344]	; (8001bf0 <IrrigationControl_AutoUpdate+0x30c>)
  8001a98:	2201      	movs	r2, #1
  8001a9a:	701a      	strb	r2, [r3, #0]
-            }
-            break;
+        }
+        break;
  8001a9c:	e137      	b.n	8001d0e <IrrigationControl_AutoUpdate+0x42a>
 
-        case IRR_ZONE1_SOAK:
-            /* Sau khi nước thấm, publish phase MEASURE trước khi đánh thức SensorTask.
-             * Thứ tự này tránh SensorTask hoàn thành quá sớm và bỏ qua phase MEASURE. */
-            if ((HAL_GetTick() - irr_state_start) >= SOAK_TIME_MS)
+    case IRR_ZONE1_SOAK:
+        /* Sau khi nước thấm, publish phase MEASURE trước khi đánh thức SensorTask.
+         * Thứ tự này tránh SensorTask hoàn thành quá sớm và bỏ qua phase MEASURE. */
+        if ((HAL_GetTick() - irr_state_start) >= SOAK_TIME_MS)
  8001a9e:	f002 fbef 	bl	8004280 <HAL_GetTick>
  8001aa2:	4602      	mov	r2, r0
  8001aa4:	4b4d      	ldr	r3, [pc, #308]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
@@ -2950,44 +2958,44 @@ void IrrigationControl_AutoUpdate(void)
  8001aaa:	f242 720f 	movw	r2, #9999	; 0x270f
  8001aae:	4293      	cmp	r3, r2
  8001ab0:	f240 812f 	bls.w	8001d12 <IrrigationControl_AutoUpdate+0x42e>
-            {
-                irr_state = IRR_ZONE1_MEASURE;
+        {
+            irr_state = IRR_ZONE1_MEASURE;
  8001ab4:	4b42      	ldr	r3, [pc, #264]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001ab6:	2203      	movs	r2, #3
  8001ab8:	701a      	strb	r2, [r3, #0]
-                irr_state_start = HAL_GetTick();
+            irr_state_start = HAL_GetTick();
  8001aba:	f002 fbe1 	bl	8004280 <HAL_GetTick>
  8001abe:	4603      	mov	r3, r0
  8001ac0:	4a46      	ldr	r2, [pc, #280]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
  8001ac2:	6013      	str	r3, [r2, #0]
-                telemetry_event_pending = 1;
+            telemetry_event_pending = 1;
  8001ac4:	4b4a      	ldr	r3, [pc, #296]	; (8001bf0 <IrrigationControl_AutoUpdate+0x30c>)
  8001ac6:	2201      	movs	r2, #1
  8001ac8:	701a      	strb	r2, [r3, #0]
-                if (!IrrigationControl_RequestMeasurement())
+            if (!IrrigationControl_RequestMeasurement())
  8001aca:	f7ff fee3 	bl	8001894 <IrrigationControl_RequestMeasurement>
  8001ace:	4603      	mov	r3, r0
  8001ad0:	2b00      	cmp	r3, #0
  8001ad2:	f040 811e 	bne.w	8001d12 <IrrigationControl_AutoUpdate+0x42e>
-                {
-                    /* Gửi yêu cầu đo thất bại: quay lại SOAK để thử lại. */
-                    irr_state = IRR_ZONE1_SOAK;
+            {
+                /* Gửi yêu cầu đo thất bại: quay lại SOAK để thử lại. */
+                irr_state = IRR_ZONE1_SOAK;
  8001ad6:	4b3a      	ldr	r3, [pc, #232]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001ad8:	2202      	movs	r2, #2
  8001ada:	701a      	strb	r2, [r3, #0]
-                    irr_state_start = HAL_GetTick();
+                irr_state_start = HAL_GetTick();
  8001adc:	f002 fbd0 	bl	8004280 <HAL_GetTick>
  8001ae0:	4603      	mov	r3, r0
  8001ae2:	4a3e      	ldr	r2, [pc, #248]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
  8001ae4:	6013      	str	r3, [r2, #0]
-                }
             }
-            break;
+        }
+        break;
  8001ae6:	e114      	b.n	8001d12 <IrrigationControl_AutoUpdate+0x42e>
 
-        case IRR_ZONE1_MEASURE:
-            /* Chờ dữ liệu mới và giữ phase MEASURE đủ lâu để ESP32/TFT quan sát được. */
-            if (!irr_measure_pending && (HAL_GetTick() - irr_state_start) >= MEASURE_MIN_DISPLAY_MS)
+    case IRR_ZONE1_MEASURE:
+        /* Chờ dữ liệu mới và giữ phase MEASURE đủ lâu để ESP32/TFT quan sát được. */
+        if (!irr_measure_pending && (HAL_GetTick() - irr_state_start) >= MEASURE_MIN_DISPLAY_MS)
  8001ae8:	4b34      	ldr	r3, [pc, #208]	; (8001bbc <IrrigationControl_AutoUpdate+0x2d8>)
  8001aea:	781b      	ldrb	r3, [r3, #0]
  8001aec:	b2db      	uxtb	r3, r3
@@ -3000,8 +3008,8 @@ void IrrigationControl_AutoUpdate(void)
  8001afe:	1ad3      	subs	r3, r2, r3
  8001b00:	f5b3 7f7a 	cmp.w	r3, #1000	; 0x3e8
  8001b04:	f0c0 8107 	bcc.w	8001d16 <IrrigationControl_AutoUpdate+0x432>
-            {
-                if (sm1 >= soil_stop_threshold[0])
+        {
+            if (sm1 >= soil_stop_threshold[0])
  8001b08:	4b3a      	ldr	r3, [pc, #232]	; (8001bf4 <IrrigationControl_AutoUpdate+0x310>)
  8001b0a:	681b      	ldr	r3, [r3, #0]
  8001b0c:	4a2f      	ldr	r2, [pc, #188]	; (8001bcc <IrrigationControl_AutoUpdate+0x2e8>)
@@ -3012,30 +3020,30 @@ void IrrigationControl_AutoUpdate(void)
  8001b18:	4603      	mov	r3, r0
  8001b1a:	2b00      	cmp	r3, #0
  8001b1c:	d00b      	beq.n	8001b36 <IrrigationControl_AutoUpdate+0x252>
-                {
-                    /* Độ ẩm đạt ngưỡng: kết thúc chu kỳ và publish trạng thái ổn định. */
-                    zone1_cycle = 0;
+            {
+                /* Độ ẩm đạt ngưỡng: kết thúc chu kỳ và publish trạng thái ổn định. */
+                zone1_cycle = 0;
  8001b1e:	4b36      	ldr	r3, [pc, #216]	; (8001bf8 <IrrigationControl_AutoUpdate+0x314>)
  8001b20:	2200      	movs	r2, #0
  8001b22:	701a      	strb	r2, [r3, #0]
-                    irr_state = IRR_IDLE;
+                irr_state = IRR_IDLE;
  8001b24:	4b26      	ldr	r3, [pc, #152]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001b26:	2200      	movs	r2, #0
  8001b28:	701a      	strb	r2, [r3, #0]
-                    irr_failed_zone = 0;
+                irr_failed_zone = 0;
  8001b2a:	4b34      	ldr	r3, [pc, #208]	; (8001bfc <IrrigationControl_AutoUpdate+0x318>)
  8001b2c:	2200      	movs	r2, #0
  8001b2e:	701a      	strb	r2, [r3, #0]
-                    IrrigationControl_ReleaseRelay();
+                IrrigationControl_ReleaseRelay();
  8001b30:	f7ff fe72 	bl	8001818 <IrrigationControl_ReleaseRelay>
-                    irr_state = IRR_ZONE1_WATERING;
-                    irr_state_start = HAL_GetTick();
-                    RelayDriver_StartZone1();
-                }
+                irr_state = IRR_ZONE1_WATERING;
+                irr_state_start = HAL_GetTick();
+                RelayDriver_StartZone1();
             }
-            break;
+        }
+        break;
  8001b34:	e0ef      	b.n	8001d16 <IrrigationControl_AutoUpdate+0x432>
-                else if (++zone1_cycle >= MAX_IRRIGATION_CYCLE)
+            else if (++zone1_cycle >= MAX_IRRIGATION_CYCLE)
  8001b36:	4b30      	ldr	r3, [pc, #192]	; (8001bf8 <IrrigationControl_AutoUpdate+0x314>)
  8001b38:	781b      	ldrb	r3, [r3, #0]
  8001b3a:	3301      	adds	r3, #1
@@ -3046,40 +3054,40 @@ void IrrigationControl_AutoUpdate(void)
  8001b44:	781b      	ldrb	r3, [r3, #0]
  8001b46:	2b04      	cmp	r3, #4
  8001b48:	d90d      	bls.n	8001b66 <IrrigationControl_AutoUpdate+0x282>
-                    DebugConsole_Print("[ERROR] Zone1 irrigation failed\r\n");
+                DebugConsole_Print("[ERROR] Zone1 irrigation failed\r\n");
  8001b4a:	482d      	ldr	r0, [pc, #180]	; (8001c00 <IrrigationControl_AutoUpdate+0x31c>)
  8001b4c:	f7ff fdd2 	bl	80016f4 <DebugConsole_Print>
-                    RelayDriver_StopAll();
+                RelayDriver_StopAll();
  8001b50:	f000 fcc6 	bl	80024e0 <RelayDriver_StopAll>
-                    irr_failed_zone = 1;
+                irr_failed_zone = 1;
  8001b54:	4b29      	ldr	r3, [pc, #164]	; (8001bfc <IrrigationControl_AutoUpdate+0x318>)
  8001b56:	2201      	movs	r2, #1
  8001b58:	701a      	strb	r2, [r3, #0]
-                    irr_state = IRR_FAILED;
+                irr_state = IRR_FAILED;
  8001b5a:	4b19      	ldr	r3, [pc, #100]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001b5c:	2207      	movs	r2, #7
  8001b5e:	701a      	strb	r2, [r3, #0]
-                    IrrigationControl_ReleaseRelay();
+                IrrigationControl_ReleaseRelay();
  8001b60:	f7ff fe5a 	bl	8001818 <IrrigationControl_ReleaseRelay>
-            break;
+        break;
  8001b64:	e0d7      	b.n	8001d16 <IrrigationControl_AutoUpdate+0x432>
-                    irr_state = IRR_ZONE1_WATERING;
+                irr_state = IRR_ZONE1_WATERING;
  8001b66:	4b16      	ldr	r3, [pc, #88]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001b68:	2201      	movs	r2, #1
  8001b6a:	701a      	strb	r2, [r3, #0]
-                    irr_state_start = HAL_GetTick();
+                irr_state_start = HAL_GetTick();
  8001b6c:	f002 fb88 	bl	8004280 <HAL_GetTick>
  8001b70:	4603      	mov	r3, r0
  8001b72:	4a1a      	ldr	r2, [pc, #104]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
  8001b74:	6013      	str	r3, [r2, #0]
-                    RelayDriver_StartZone1();
+                RelayDriver_StartZone1();
  8001b76:	f000 fc3f 	bl	80023f8 <RelayDriver_StartZone1>
-            break;
+        break;
  8001b7a:	e0cc      	b.n	8001d16 <IrrigationControl_AutoUpdate+0x432>
 
-        case IRR_ZONE2_WATERING:
-            /* Kết thúc xung tưới Zone 2 rồi chuyển sang thời gian nghỉ thấm. */
-            if ((HAL_GetTick() - irr_state_start) >= WATER_PULSE_MS)
+    case IRR_ZONE2_WATERING:
+        /* Kết thúc xung tưới Zone 2 rồi chuyển sang thời gian nghỉ thấm. */
+        if ((HAL_GetTick() - irr_state_start) >= WATER_PULSE_MS)
  8001b7c:	f002 fb80 	bl	8004280 <HAL_GetTick>
  8001b80:	4602      	mov	r2, r0
  8001b82:	4b16      	ldr	r3, [pc, #88]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
@@ -3088,25 +3096,25 @@ void IrrigationControl_AutoUpdate(void)
  8001b88:	f241 3287 	movw	r2, #4999	; 0x1387
  8001b8c:	4293      	cmp	r3, r2
  8001b8e:	f240 80c4 	bls.w	8001d1a <IrrigationControl_AutoUpdate+0x436>
-            {
-                RelayDriver_StopCurrent(RELAY_OWNER_AUTO);
+        {
+            RelayDriver_StopCurrent(RELAY_OWNER_AUTO);
  8001b92:	2002      	movs	r0, #2
  8001b94:	f000 fcda 	bl	800254c <RelayDriver_StopCurrent>
-                irr_state = IRR_ZONE2_SOAK;
+            irr_state = IRR_ZONE2_SOAK;
  8001b98:	4b09      	ldr	r3, [pc, #36]	; (8001bc0 <IrrigationControl_AutoUpdate+0x2dc>)
  8001b9a:	2205      	movs	r2, #5
  8001b9c:	701a      	strb	r2, [r3, #0]
-                irr_state_start = HAL_GetTick();
+            irr_state_start = HAL_GetTick();
  8001b9e:	f002 fb6f 	bl	8004280 <HAL_GetTick>
  8001ba2:	4603      	mov	r3, r0
  8001ba4:	4a0d      	ldr	r2, [pc, #52]	; (8001bdc <IrrigationControl_AutoUpdate+0x2f8>)
  8001ba6:	6013      	str	r3, [r2, #0]
-                telemetry_event_pending = 1;
+            telemetry_event_pending = 1;
  8001ba8:	4b11      	ldr	r3, [pc, #68]	; (8001bf0 <IrrigationControl_AutoUpdate+0x30c>)
  8001baa:	2201      	movs	r2, #1
  8001bac:	701a      	strb	r2, [r3, #0]
-            }
-            break;
+        }
+        break;
  8001bae:	e0b4      	b.n	8001d1a <IrrigationControl_AutoUpdate+0x436>
  8001bb0:	200003fc 	.word	0x200003fc
  8001bb4:	20000018 	.word	0x20000018
@@ -3130,9 +3138,9 @@ void IrrigationControl_AutoUpdate(void)
  8001bfc:	20000407 	.word	0x20000407
  8001c00:	0800d650 	.word	0x0800d650
 
-        case IRR_ZONE2_SOAK:
-            /* Vào MEASURE trước khi gửi yêu cầu để phase không bị bỏ qua. */
-            if ((HAL_GetTick() - irr_state_start) >= SOAK_TIME_MS)
+    case IRR_ZONE2_SOAK:
+        /* Vào MEASURE trước khi gửi yêu cầu để phase không bị bỏ qua. */
+        if ((HAL_GetTick() - irr_state_start) >= SOAK_TIME_MS)
  8001c04:	f002 fb3c 	bl	8004280 <HAL_GetTick>
  8001c08:	4602      	mov	r2, r0
  8001c0a:	4b48      	ldr	r3, [pc, #288]	; (8001d2c <IrrigationControl_AutoUpdate+0x448>)
@@ -3141,44 +3149,44 @@ void IrrigationControl_AutoUpdate(void)
  8001c10:	f242 720f 	movw	r2, #9999	; 0x270f
  8001c14:	4293      	cmp	r3, r2
  8001c16:	f240 8082 	bls.w	8001d1e <IrrigationControl_AutoUpdate+0x43a>
-            {
-                irr_state = IRR_ZONE2_MEASURE;
+        {
+            irr_state = IRR_ZONE2_MEASURE;
  8001c1a:	4b45      	ldr	r3, [pc, #276]	; (8001d30 <IrrigationControl_AutoUpdate+0x44c>)
  8001c1c:	2206      	movs	r2, #6
  8001c1e:	701a      	strb	r2, [r3, #0]
-                irr_state_start = HAL_GetTick();
+            irr_state_start = HAL_GetTick();
  8001c20:	f002 fb2e 	bl	8004280 <HAL_GetTick>
  8001c24:	4603      	mov	r3, r0
  8001c26:	4a41      	ldr	r2, [pc, #260]	; (8001d2c <IrrigationControl_AutoUpdate+0x448>)
  8001c28:	6013      	str	r3, [r2, #0]
-                telemetry_event_pending = 1;
+            telemetry_event_pending = 1;
  8001c2a:	4b42      	ldr	r3, [pc, #264]	; (8001d34 <IrrigationControl_AutoUpdate+0x450>)
  8001c2c:	2201      	movs	r2, #1
  8001c2e:	701a      	strb	r2, [r3, #0]
-                if (!IrrigationControl_RequestMeasurement())
+            if (!IrrigationControl_RequestMeasurement())
  8001c30:	f7ff fe30 	bl	8001894 <IrrigationControl_RequestMeasurement>
  8001c34:	4603      	mov	r3, r0
  8001c36:	2b00      	cmp	r3, #0
  8001c38:	d171      	bne.n	8001d1e <IrrigationControl_AutoUpdate+0x43a>
-                {
-                    /* Gửi yêu cầu đo thất bại: quay lại SOAK để thử lại. */
-                    irr_state = IRR_ZONE2_SOAK;
+            {
+                /* Gửi yêu cầu đo thất bại: quay lại SOAK để thử lại. */
+                irr_state = IRR_ZONE2_SOAK;
  8001c3a:	4b3d      	ldr	r3, [pc, #244]	; (8001d30 <IrrigationControl_AutoUpdate+0x44c>)
  8001c3c:	2205      	movs	r2, #5
  8001c3e:	701a      	strb	r2, [r3, #0]
-                    irr_state_start = HAL_GetTick();
+                irr_state_start = HAL_GetTick();
  8001c40:	f002 fb1e 	bl	8004280 <HAL_GetTick>
  8001c44:	4603      	mov	r3, r0
  8001c46:	4a39      	ldr	r2, [pc, #228]	; (8001d2c <IrrigationControl_AutoUpdate+0x448>)
  8001c48:	6013      	str	r3, [r2, #0]
-                }
             }
-            break;
+        }
+        break;
  8001c4a:	e068      	b.n	8001d1e <IrrigationControl_AutoUpdate+0x43a>
 
-        case IRR_ZONE2_MEASURE:
-            /* Chờ dữ liệu mới và giữ phase MEASURE đủ lâu để ESP32/TFT quan sát được. */
-            if (!irr_measure_pending && (HAL_GetTick() - irr_state_start) >= MEASURE_MIN_DISPLAY_MS)
+    case IRR_ZONE2_MEASURE:
+        /* Chờ dữ liệu mới và giữ phase MEASURE đủ lâu để ESP32/TFT quan sát được. */
+        if (!irr_measure_pending && (HAL_GetTick() - irr_state_start) >= MEASURE_MIN_DISPLAY_MS)
  8001c4c:	4b3a      	ldr	r3, [pc, #232]	; (8001d38 <IrrigationControl_AutoUpdate+0x454>)
  8001c4e:	781b      	ldrb	r3, [r3, #0]
  8001c50:	b2db      	uxtb	r3, r3
@@ -3191,8 +3199,8 @@ void IrrigationControl_AutoUpdate(void)
  8001c60:	1ad3      	subs	r3, r2, r3
  8001c62:	f5b3 7f7a 	cmp.w	r3, #1000	; 0x3e8
  8001c66:	d35c      	bcc.n	8001d22 <IrrigationControl_AutoUpdate+0x43e>
-            {
-                if (sm2 >= soil_stop_threshold[1])
+        {
+            if (sm2 >= soil_stop_threshold[1])
  8001c68:	4b34      	ldr	r3, [pc, #208]	; (8001d3c <IrrigationControl_AutoUpdate+0x458>)
  8001c6a:	685b      	ldr	r3, [r3, #4]
  8001c6c:	4a34      	ldr	r2, [pc, #208]	; (8001d40 <IrrigationControl_AutoUpdate+0x45c>)
@@ -3203,30 +3211,30 @@ void IrrigationControl_AutoUpdate(void)
  8001c78:	4603      	mov	r3, r0
  8001c7a:	2b00      	cmp	r3, #0
  8001c7c:	d00b      	beq.n	8001c96 <IrrigationControl_AutoUpdate+0x3b2>
-                {
-                    /* Độ ẩm đạt ngưỡng: kết thúc chu kỳ và publish trạng thái ổn định. */
-                    zone2_cycle = 0;
+            {
+                /* Độ ẩm đạt ngưỡng: kết thúc chu kỳ và publish trạng thái ổn định. */
+                zone2_cycle = 0;
  8001c7e:	4b31      	ldr	r3, [pc, #196]	; (8001d44 <IrrigationControl_AutoUpdate+0x460>)
  8001c80:	2200      	movs	r2, #0
  8001c82:	701a      	strb	r2, [r3, #0]
-                    irr_state = IRR_IDLE;
+                irr_state = IRR_IDLE;
  8001c84:	4b2a      	ldr	r3, [pc, #168]	; (8001d30 <IrrigationControl_AutoUpdate+0x44c>)
  8001c86:	2200      	movs	r2, #0
  8001c88:	701a      	strb	r2, [r3, #0]
-                    irr_failed_zone = 0;
+                irr_failed_zone = 0;
  8001c8a:	4b2f      	ldr	r3, [pc, #188]	; (8001d48 <IrrigationControl_AutoUpdate+0x464>)
  8001c8c:	2200      	movs	r2, #0
  8001c8e:	701a      	strb	r2, [r3, #0]
-                    IrrigationControl_ReleaseRelay();
+                IrrigationControl_ReleaseRelay();
  8001c90:	f7ff fdc2 	bl	8001818 <IrrigationControl_ReleaseRelay>
-                    irr_state = IRR_ZONE2_WATERING;
-                    irr_state_start = HAL_GetTick();
-                    RelayDriver_StartZone2();
-                }
+                irr_state = IRR_ZONE2_WATERING;
+                irr_state_start = HAL_GetTick();
+                RelayDriver_StartZone2();
             }
-            break;
+        }
+        break;
  8001c94:	e045      	b.n	8001d22 <IrrigationControl_AutoUpdate+0x43e>
-                else if (++zone2_cycle >= MAX_IRRIGATION_CYCLE)
+            else if (++zone2_cycle >= MAX_IRRIGATION_CYCLE)
  8001c96:	4b2b      	ldr	r3, [pc, #172]	; (8001d44 <IrrigationControl_AutoUpdate+0x460>)
  8001c98:	781b      	ldrb	r3, [r3, #0]
  8001c9a:	3301      	adds	r3, #1
@@ -3237,91 +3245,91 @@ void IrrigationControl_AutoUpdate(void)
  8001ca4:	781b      	ldrb	r3, [r3, #0]
  8001ca6:	2b04      	cmp	r3, #4
  8001ca8:	d90d      	bls.n	8001cc6 <IrrigationControl_AutoUpdate+0x3e2>
-                    DebugConsole_Print("[ERROR] Zone2 irrigation failed\r\n");
+                DebugConsole_Print("[ERROR] Zone2 irrigation failed\r\n");
  8001caa:	4828      	ldr	r0, [pc, #160]	; (8001d4c <IrrigationControl_AutoUpdate+0x468>)
  8001cac:	f7ff fd22 	bl	80016f4 <DebugConsole_Print>
-                    RelayDriver_StopAll();
+                RelayDriver_StopAll();
  8001cb0:	f000 fc16 	bl	80024e0 <RelayDriver_StopAll>
-                    irr_failed_zone = 2;
+                irr_failed_zone = 2;
  8001cb4:	4b24      	ldr	r3, [pc, #144]	; (8001d48 <IrrigationControl_AutoUpdate+0x464>)
  8001cb6:	2202      	movs	r2, #2
  8001cb8:	701a      	strb	r2, [r3, #0]
-                    irr_state = IRR_FAILED;
+                irr_state = IRR_FAILED;
  8001cba:	4b1d      	ldr	r3, [pc, #116]	; (8001d30 <IrrigationControl_AutoUpdate+0x44c>)
  8001cbc:	2207      	movs	r2, #7
  8001cbe:	701a      	strb	r2, [r3, #0]
-                    IrrigationControl_ReleaseRelay();
+                IrrigationControl_ReleaseRelay();
  8001cc0:	f7ff fdaa 	bl	8001818 <IrrigationControl_ReleaseRelay>
-            break;
+        break;
  8001cc4:	e02d      	b.n	8001d22 <IrrigationControl_AutoUpdate+0x43e>
-                    irr_state = IRR_ZONE2_WATERING;
+                irr_state = IRR_ZONE2_WATERING;
  8001cc6:	4b1a      	ldr	r3, [pc, #104]	; (8001d30 <IrrigationControl_AutoUpdate+0x44c>)
  8001cc8:	2204      	movs	r2, #4
  8001cca:	701a      	strb	r2, [r3, #0]
-                    irr_state_start = HAL_GetTick();
+                irr_state_start = HAL_GetTick();
  8001ccc:	f002 fad8 	bl	8004280 <HAL_GetTick>
  8001cd0:	4603      	mov	r3, r0
  8001cd2:	4a16      	ldr	r2, [pc, #88]	; (8001d2c <IrrigationControl_AutoUpdate+0x448>)
  8001cd4:	6013      	str	r3, [r2, #0]
-                    RelayDriver_StartZone2();
+                RelayDriver_StartZone2();
  8001cd6:	f000 fbc9 	bl	800246c <RelayDriver_StartZone2>
-            break;
+        break;
  8001cda:	e022      	b.n	8001d22 <IrrigationControl_AutoUpdate+0x43e>
-            /* Yêu cầu đổi mode rõ ràng trước khi AUTO được phép thử lại. */
-            return;
+        /* Yêu cầu đổi mode rõ ràng trước khi AUTO được phép thử lại. */
+        return;
 
-        default:
-            /* State không hợp lệ: đưa output và FSM về trạng thái an toàn. */
-            RelayDriver_StopAll();
+    default:
+        /* State không hợp lệ: đưa output và FSM về trạng thái an toàn. */
+        RelayDriver_StopAll();
  8001cdc:	f000 fc00 	bl	80024e0 <RelayDriver_StopAll>
-            zone1_cycle = 0;
+        zone1_cycle = 0;
  8001ce0:	4b1b      	ldr	r3, [pc, #108]	; (8001d50 <IrrigationControl_AutoUpdate+0x46c>)
  8001ce2:	2200      	movs	r2, #0
  8001ce4:	701a      	strb	r2, [r3, #0]
-            zone2_cycle = 0;
+        zone2_cycle = 0;
  8001ce6:	4b17      	ldr	r3, [pc, #92]	; (8001d44 <IrrigationControl_AutoUpdate+0x460>)
  8001ce8:	2200      	movs	r2, #0
  8001cea:	701a      	strb	r2, [r3, #0]
-            irr_state = IRR_IDLE;
+        irr_state = IRR_IDLE;
  8001cec:	4b10      	ldr	r3, [pc, #64]	; (8001d30 <IrrigationControl_AutoUpdate+0x44c>)
  8001cee:	2200      	movs	r2, #0
  8001cf0:	701a      	strb	r2, [r3, #0]
-            irr_failed_zone = 0;
+        irr_failed_zone = 0;
  8001cf2:	4b15      	ldr	r3, [pc, #84]	; (8001d48 <IrrigationControl_AutoUpdate+0x464>)
  8001cf4:	2200      	movs	r2, #0
  8001cf6:	701a      	strb	r2, [r3, #0]
-            IrrigationControl_ReleaseRelay();
+        IrrigationControl_ReleaseRelay();
  8001cf8:	f7ff fd8e 	bl	8001818 <IrrigationControl_ReleaseRelay>
-            break;
+        break;
  8001cfc:	e012      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-    if (relay_owner == RELAY_OWNER_MANUAL || irr_mode != MODE_AUTO) return;
+        return;
  8001cfe:	bf00      	nop
  8001d00:	e010      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
         return;
  8001d02:	bf00      	nop
  8001d04:	e00e      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-            return;
+        return;
  8001d06:	bf00      	nop
  8001d08:	e00c      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-                return;
+            return;
  8001d0a:	bf00      	nop
  8001d0c:	e00a      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-            break;
+        break;
  8001d0e:	bf00      	nop
  8001d10:	e008      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-            break;
+        break;
  8001d12:	bf00      	nop
  8001d14:	e006      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-            break;
+        break;
  8001d16:	bf00      	nop
  8001d18:	e004      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-            break;
+        break;
  8001d1a:	bf00      	nop
  8001d1c:	e002      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-            break;
+        break;
  8001d1e:	bf00      	nop
  8001d20:	e000      	b.n	8001d24 <IrrigationControl_AutoUpdate+0x440>
-            break;
+        break;
  8001d22:	bf00      	nop
     }
 }
@@ -3424,12 +3432,12 @@ uint8_t IrrigationControl_ProcessCommand(void)
  8001dfe:	4603      	mov	r3, r0
  8001e00:	2b00      	cmp	r3, #0
  8001e02:	d055      	beq.n	8001eb0 <IrrigationControl_ProcessCommand+0x15c>
-            (zone == 1U || zone == 2U) && start_threshold >= 0.0f &&
+            (zone == 1 || zone == 2) && start_threshold >= 0.0f &&
  8001e04:	6ebb      	ldr	r3, [r7, #104]	; 0x68
             stop_text != NULL && IrrigationControl_ParsePercent(stop_text + 5, '>', &stop_threshold) &&
  8001e06:	2b01      	cmp	r3, #1
  8001e08:	d002      	beq.n	8001e10 <IrrigationControl_ProcessCommand+0xbc>
-            (zone == 1U || zone == 2U) && start_threshold >= 0.0f &&
+            (zone == 1 || zone == 2) && start_threshold >= 0.0f &&
  8001e0a:	6ebb      	ldr	r3, [r7, #104]	; 0x68
  8001e0c:	2b02      	cmp	r3, #2
  8001e0e:	d14f      	bne.n	8001eb0 <IrrigationControl_ProcessCommand+0x15c>
@@ -3442,7 +3450,7 @@ uint8_t IrrigationControl_ProcessCommand(void)
  8001e20:	d046      	beq.n	8001eb0 <IrrigationControl_ProcessCommand+0x15c>
             stop_threshold <= 100.0f && start_threshold < stop_threshold)
  8001e22:	6e3b      	ldr	r3, [r7, #96]	; 0x60
-            (zone == 1U || zone == 2U) && start_threshold >= 0.0f &&
+            (zone == 1 || zone == 2) && start_threshold >= 0.0f &&
  8001e24:	4989      	ldr	r1, [pc, #548]	; (800204c <IrrigationControl_ProcessCommand+0x2f8>)
  8001e26:	4618      	mov	r0, r3
  8001e28:	f7ff f8ee 	bl	8001008 <__aeabi_fcmple>
@@ -3459,20 +3467,21 @@ uint8_t IrrigationControl_ProcessCommand(void)
  8001e40:	2b00      	cmp	r3, #0
  8001e42:	d035      	beq.n	8001eb0 <IrrigationControl_ProcessCommand+0x15c>
         {
-            soil_start_threshold[zone - 1U] = start_threshold;
+            // Cập nhật ngưỡng tưới cho zone tương ứng
+            soil_start_threshold[zone - 1] = start_threshold;
  8001e44:	6ebb      	ldr	r3, [r7, #104]	; 0x68
  8001e46:	3b01      	subs	r3, #1
  8001e48:	6e7a      	ldr	r2, [r7, #100]	; 0x64
  8001e4a:	4981      	ldr	r1, [pc, #516]	; (8002050 <IrrigationControl_ProcessCommand+0x2fc>)
  8001e4c:	f841 2023 	str.w	r2, [r1, r3, lsl #2]
-            soil_stop_threshold[zone - 1U] = stop_threshold;
+            soil_stop_threshold[zone - 1] = stop_threshold;
  8001e50:	6ebb      	ldr	r3, [r7, #104]	; 0x68
  8001e52:	3b01      	subs	r3, #1
  8001e54:	6e3a      	ldr	r2, [r7, #96]	; 0x60
  8001e56:	497f      	ldr	r1, [pc, #508]	; (8002054 <IrrigationControl_ProcessCommand+0x300>)
  8001e58:	f841 2023 	str.w	r2, [r1, r3, lsl #2]
 
-            /* AUTO must use a fresh sample after its decision thresholds change. */
+            /* Khi ngưỡng thay đổi trong AUTO, STM32 hủy dữ liệu cảm biến cũ và yêu cầu đo lại trước khi đưa ra quyết định tiếp theo. */
             if (irr_mode == MODE_AUTO)
  8001e5c:	4b7e      	ldr	r3, [pc, #504]	; (8002058 <IrrigationControl_ProcessCommand+0x304>)
  8001e5e:	781b      	ldrb	r3, [r3, #0]
@@ -3484,7 +3493,7 @@ uint8_t IrrigationControl_ProcessCommand(void)
  8001e66:	4b7d      	ldr	r3, [pc, #500]	; (800205c <IrrigationControl_ProcessCommand+0x308>)
  8001e68:	2200      	movs	r2, #0
  8001e6a:	701a      	strb	r2, [r3, #0]
-                last_sensor_update_tick = 0;
+                last_sensor_update_tick = 0; // Reset timer để AUTO đo lại sensor ngay
  8001e6c:	4b7c      	ldr	r3, [pc, #496]	; (8002060 <IrrigationControl_ProcessCommand+0x30c>)
  8001e6e:	2200      	movs	r2, #0
  8001e70:	601a      	str	r2, [r3, #0]
@@ -4078,17 +4087,18 @@ uint8_t IrrigationControl_GetActiveZone(void)
  800227c:	b480      	push	{r7}
  800227e:	af00      	add	r7, sp, #0
     /* Xác định zone active từ van thực tế và state machine AUTO. */
-    if (irr_state == IRR_FAILED) return irr_failed_zone;
+    if (irr_state == IRR_FAILED)
  8002280:	4b1c      	ldr	r3, [pc, #112]	; (80022f4 <IrrigationControl_GetActiveZone+0x78>)
  8002282:	781b      	ldrb	r3, [r3, #0]
  8002284:	b2db      	uxtb	r3, r3
  8002286:	2b07      	cmp	r3, #7
  8002288:	d103      	bne.n	8002292 <IrrigationControl_GetActiveZone+0x16>
+        return irr_failed_zone;
  800228a:	4b1b      	ldr	r3, [pc, #108]	; (80022f8 <IrrigationControl_GetActiveZone+0x7c>)
  800228c:	781b      	ldrb	r3, [r3, #0]
  800228e:	b2db      	uxtb	r3, r3
  8002290:	e02c      	b.n	80022ec <IrrigationControl_GetActiveZone+0x70>
-    if (valve1_state == VALVE_ON || irr_state == IRR_ZONE1_WATERING || irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE1_MEASURE) return 1;
+    if (valve1_state == VALVE_ON || irr_state == IRR_ZONE1_WATERING || irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE1_MEASURE)
  8002292:	4b1a      	ldr	r3, [pc, #104]	; (80022fc <IrrigationControl_GetActiveZone+0x80>)
  8002294:	781b      	ldrb	r3, [r3, #0]
  8002296:	b2db      	uxtb	r3, r3
@@ -4109,9 +4119,10 @@ uint8_t IrrigationControl_GetActiveZone(void)
  80022b4:	b2db      	uxtb	r3, r3
  80022b6:	2b03      	cmp	r3, #3
  80022b8:	d101      	bne.n	80022be <IrrigationControl_GetActiveZone+0x42>
+        return 1;
  80022ba:	2301      	movs	r3, #1
  80022bc:	e016      	b.n	80022ec <IrrigationControl_GetActiveZone+0x70>
-    if (valve2_state == VALVE_ON || irr_state == IRR_ZONE2_WATERING || irr_state == IRR_ZONE2_SOAK || irr_state == IRR_ZONE2_MEASURE) return 2;
+    if (valve2_state == VALVE_ON || irr_state == IRR_ZONE2_WATERING || irr_state == IRR_ZONE2_SOAK || irr_state == IRR_ZONE2_MEASURE)
  80022be:	4b10      	ldr	r3, [pc, #64]	; (8002300 <IrrigationControl_GetActiveZone+0x84>)
  80022c0:	781b      	ldrb	r3, [r3, #0]
  80022c2:	b2db      	uxtb	r3, r3
@@ -4132,6 +4143,7 @@ uint8_t IrrigationControl_GetActiveZone(void)
  80022e0:	b2db      	uxtb	r3, r3
  80022e2:	2b06      	cmp	r3, #6
  80022e4:	d101      	bne.n	80022ea <IrrigationControl_GetActiveZone+0x6e>
+        return 2;
  80022e6:	2302      	movs	r3, #2
  80022e8:	e000      	b.n	80022ec <IrrigationControl_GetActiveZone+0x70>
     return 0;
@@ -4165,14 +4177,14 @@ uint8_t IrrigationControl_GetPhase(void)
  8002316:	b2db      	uxtb	r3, r3
  8002318:	2b04      	cmp	r3, #4
  800231a:	d00e      	beq.n	800233a <IrrigationControl_GetPhase+0x36>
-        (relay_owner == RELAY_OWNER_MANUAL && (valve1_state == VALVE_ON || valve2_state == VALVE_ON))) return 1;
+        (relay_owner == RELAY_OWNER_MANUAL && (valve1_state == VALVE_ON || valve2_state == VALVE_ON)))
  800231c:	4b1b      	ldr	r3, [pc, #108]	; (800238c <IrrigationControl_GetPhase+0x88>)
  800231e:	781b      	ldrb	r3, [r3, #0]
  8002320:	b2db      	uxtb	r3, r3
     if (irr_state == IRR_ZONE1_WATERING || irr_state == IRR_ZONE2_WATERING ||
  8002322:	2b01      	cmp	r3, #1
  8002324:	d10b      	bne.n	800233e <IrrigationControl_GetPhase+0x3a>
-        (relay_owner == RELAY_OWNER_MANUAL && (valve1_state == VALVE_ON || valve2_state == VALVE_ON))) return 1;
+        (relay_owner == RELAY_OWNER_MANUAL && (valve1_state == VALVE_ON || valve2_state == VALVE_ON)))
  8002326:	4b1a      	ldr	r3, [pc, #104]	; (8002390 <IrrigationControl_GetPhase+0x8c>)
  8002328:	781b      	ldrb	r3, [r3, #0]
  800232a:	b2db      	uxtb	r3, r3
@@ -4183,9 +4195,10 @@ uint8_t IrrigationControl_GetPhase(void)
  8002334:	b2db      	uxtb	r3, r3
  8002336:	2b01      	cmp	r3, #1
  8002338:	d101      	bne.n	800233e <IrrigationControl_GetPhase+0x3a>
+        return 1;
  800233a:	2301      	movs	r3, #1
  800233c:	e01f      	b.n	800237e <IrrigationControl_GetPhase+0x7a>
-    if (irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE2_SOAK) return 2;
+    if (irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE2_SOAK)
  800233e:	4b12      	ldr	r3, [pc, #72]	; (8002388 <IrrigationControl_GetPhase+0x84>)
  8002340:	781b      	ldrb	r3, [r3, #0]
  8002342:	b2db      	uxtb	r3, r3
@@ -4196,9 +4209,10 @@ uint8_t IrrigationControl_GetPhase(void)
  800234c:	b2db      	uxtb	r3, r3
  800234e:	2b05      	cmp	r3, #5
  8002350:	d101      	bne.n	8002356 <IrrigationControl_GetPhase+0x52>
+        return 2;
  8002352:	2302      	movs	r3, #2
  8002354:	e013      	b.n	800237e <IrrigationControl_GetPhase+0x7a>
-    if (irr_state == IRR_ZONE1_MEASURE || irr_state == IRR_ZONE2_MEASURE) return 3;
+    if (irr_state == IRR_ZONE1_MEASURE || irr_state == IRR_ZONE2_MEASURE)
  8002356:	4b0c      	ldr	r3, [pc, #48]	; (8002388 <IrrigationControl_GetPhase+0x84>)
  8002358:	781b      	ldrb	r3, [r3, #0]
  800235a:	b2db      	uxtb	r3, r3
@@ -4209,14 +4223,16 @@ uint8_t IrrigationControl_GetPhase(void)
  8002364:	b2db      	uxtb	r3, r3
  8002366:	2b06      	cmp	r3, #6
  8002368:	d101      	bne.n	800236e <IrrigationControl_GetPhase+0x6a>
+        return 3;
  800236a:	2303      	movs	r3, #3
  800236c:	e007      	b.n	800237e <IrrigationControl_GetPhase+0x7a>
-    if (irr_state == IRR_FAILED) return 4;
+    if (irr_state == IRR_FAILED)
  800236e:	4b06      	ldr	r3, [pc, #24]	; (8002388 <IrrigationControl_GetPhase+0x84>)
  8002370:	781b      	ldrb	r3, [r3, #0]
  8002372:	b2db      	uxtb	r3, r3
  8002374:	2b07      	cmp	r3, #7
  8002376:	d101      	bne.n	800237c <IrrigationControl_GetPhase+0x78>
+        return 4;
  8002378:	2304      	movs	r3, #4
  800237a:	e000      	b.n	800237e <IrrigationControl_GetPhase+0x7a>
     return 0;
@@ -4239,37 +4255,41 @@ uint8_t IrrigationControl_GetCycle(void)
  8002398:	b580      	push	{r7, lr}
  800239a:	af00      	add	r7, sp, #0
     /* Chu kỳ tưới chỉ có ý nghĩa trong AUTO; giá trị truyền đi bắt đầu từ 1. */
-    if (irr_mode != MODE_AUTO) return 0;
+    if (irr_mode != MODE_AUTO)
  800239c:	4b12      	ldr	r3, [pc, #72]	; (80023e8 <IrrigationControl_GetCycle+0x50>)
  800239e:	781b      	ldrb	r3, [r3, #0]
  80023a0:	b2db      	uxtb	r3, r3
  80023a2:	2b01      	cmp	r3, #1
  80023a4:	d001      	beq.n	80023aa <IrrigationControl_GetCycle+0x12>
+        return 0;
  80023a6:	2300      	movs	r3, #0
  80023a8:	e01b      	b.n	80023e2 <IrrigationControl_GetCycle+0x4a>
-    if (irr_state == IRR_FAILED) return MAX_IRRIGATION_CYCLE;
+    if (irr_state == IRR_FAILED)
  80023aa:	4b10      	ldr	r3, [pc, #64]	; (80023ec <IrrigationControl_GetCycle+0x54>)
  80023ac:	781b      	ldrb	r3, [r3, #0]
  80023ae:	b2db      	uxtb	r3, r3
  80023b0:	2b07      	cmp	r3, #7
  80023b2:	d101      	bne.n	80023b8 <IrrigationControl_GetCycle+0x20>
+        return MAX_IRRIGATION_CYCLE;
  80023b4:	2305      	movs	r3, #5
  80023b6:	e014      	b.n	80023e2 <IrrigationControl_GetCycle+0x4a>
-    if (IrrigationControl_GetActiveZone() == 1) return zone1_cycle + 1U;
+    if (IrrigationControl_GetActiveZone() == 1)
  80023b8:	f7ff ff60 	bl	800227c <IrrigationControl_GetActiveZone>
  80023bc:	4603      	mov	r3, r0
  80023be:	2b01      	cmp	r3, #1
  80023c0:	d104      	bne.n	80023cc <IrrigationControl_GetCycle+0x34>
+        return zone1_cycle + 1U;
  80023c2:	4b0b      	ldr	r3, [pc, #44]	; (80023f0 <IrrigationControl_GetCycle+0x58>)
  80023c4:	781b      	ldrb	r3, [r3, #0]
  80023c6:	3301      	adds	r3, #1
  80023c8:	b2db      	uxtb	r3, r3
  80023ca:	e00a      	b.n	80023e2 <IrrigationControl_GetCycle+0x4a>
-    if (IrrigationControl_GetActiveZone() == 2) return zone2_cycle + 1U;
+    if (IrrigationControl_GetActiveZone() == 2)
  80023cc:	f7ff ff56 	bl	800227c <IrrigationControl_GetActiveZone>
  80023d0:	4603      	mov	r3, r0
  80023d2:	2b02      	cmp	r3, #2
  80023d4:	d104      	bne.n	80023e0 <IrrigationControl_GetCycle+0x48>
+        return zone2_cycle + 1U;
  80023d6:	4b07      	ldr	r3, [pc, #28]	; (80023f4 <IrrigationControl_GetCycle+0x5c>)
  80023d8:	781b      	ldrb	r3, [r3, #0]
  80023da:	3301      	adds	r3, #1
@@ -4731,7 +4751,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
  80026c6:	4b3b      	ldr	r3, [pc, #236]	; (80027b4 <HAL_UART_RxCpltCallback+0x100>)
  80026c8:	781b      	ldrb	r3, [r3, #0]
  80026ca:	73fb      	strb	r3, [r7, #15]
-    last_lora_rx_tick = HAL_GetTick();
+    last_lora_rx_tick = HAL_GetTick();	// Lưu thời điểm nhận byte mới
  80026cc:	f001 fdd8 	bl	8004280 <HAL_GetTick>
  80026d0:	4603      	mov	r3, r0
  80026d2:	4a39      	ldr	r2, [pc, #228]	; (80027b8 <HAL_UART_RxCpltCallback+0x104>)
@@ -4956,7 +4976,7 @@ static void LoRaProtocol_SendAck(uint32_t sequence)
  8002838:	6013      	str	r3, [r2, #0]
 
     /* Chờ E32 phát RF hoàn tất trước khi Task tiếp tục. */
-    (void)LoRaE32_WaitReady(500U);
+    LoRaE32_WaitReady(500U);
  800283a:	f44f 70fa 	mov.w	r0, #500	; 0x1f4
  800283e:	f7ff fec7 	bl	80025d0 <LoRaE32_WaitReady>
  8002842:	e000      	b.n	8002846 <LoRaProtocol_SendAck+0x6e>
@@ -5361,6 +5381,7 @@ static void LoRaProtocol_ProcessCommand(char *frame)
  8002b10:	4b10      	ldr	r3, [pc, #64]	; (8002b54 <LoRaProtocol_ProcessCommand+0x124>)
  8002b12:	2200      	movs	r2, #0
  8002b14:	f883 203f 	strb.w	r2, [r3, #63]	; 0x3f
+
         LoRaProtocol_SendAck(seq);
  8002b18:	68fb      	ldr	r3, [r7, #12]
  8002b1a:	4618      	mov	r0, r3
@@ -5607,7 +5628,7 @@ void LoRaProtocol_SendTelemetry(void)
  8002ce2:	4a12      	ldr	r2, [pc, #72]	; (8002d2c <LoRaProtocol_SendTelemetry+0x170>)
  8002ce4:	6013      	str	r3, [r2, #0]
 
-    (void)LoRaE32_WaitReady(500U);
+    LoRaE32_WaitReady(500U);
  8002ce6:	f44f 70fa 	mov.w	r0, #500	; 0x1f4
  8002cea:	f7ff fc71 	bl	80025d0 <LoRaE32_WaitReady>
  8002cee:	e000      	b.n	8002cf2 <LoRaProtocol_SendTelemetry+0x136>
@@ -6251,7 +6272,7 @@ void AppTasks_RunLoRa(void *argument)
  80030e6:	2b00      	cmp	r3, #0
  80030e8:	d101      	bne.n	80030ee <AppTasks_RunLoRa+0x11a>
             {
-                (void)IrrigationControl_RequestMeasurement();
+                IrrigationControl_RequestMeasurement();
  80030ea:	f7fe fbd3 	bl	8001894 <IrrigationControl_RequestMeasurement>
             }
 
@@ -6390,14 +6411,14 @@ void AppTasks_RunSensor(void *argument)
  80031c2:	f003 0301 	and.w	r3, r3, #1
  80031c6:	2b00      	cmp	r3, #0
  80031c8:	d005      	beq.n	80031d6 <AppTasks_RunSensor+0x4a>
-        	(void)osThreadFlagsSet(LoRaTaskHandle, SENSOR_READY_SIGNAL);
+        	osThreadFlagsSet(LoRaTaskHandle, SENSOR_READY_SIGNAL);
  80031ca:	4b12      	ldr	r3, [pc, #72]	; (8003214 <AppTasks_RunSensor+0x88>)
  80031cc:	681b      	ldr	r3, [r3, #0]
  80031ce:	2102      	movs	r1, #2
  80031d0:	4618      	mov	r0, r3
  80031d2:	f005 f8f7 	bl	80083c4 <osThreadFlagsSet>
 
-        /* AUTO FSM: xóa pending và báo IrrigationTask phép đo đã hoàn tất. */
+        /* AUTO FSM: xóa pending và báo IrrigationTask đo đã hoàn tất. */
         if (signals & IRRIGATION_READ_SIGNAL)
  80031d6:	68bb      	ldr	r3, [r7, #8]
  80031d8:	f003 0320 	and.w	r3, r3, #32
@@ -6408,7 +6429,7 @@ void AppTasks_RunSensor(void *argument)
  80031e0:	4b0d      	ldr	r3, [pc, #52]	; (8003218 <AppTasks_RunSensor+0x8c>)
  80031e2:	2200      	movs	r2, #0
  80031e4:	701a      	strb	r2, [r3, #0]
-            (void)osThreadFlagsSet(IrrigationTaskHandle, IRRIGATION_READY_SIGNAL);
+            osThreadFlagsSet(IrrigationTaskHandle, IRRIGATION_READY_SIGNAL);
  80031e6:	4b0d      	ldr	r3, [pc, #52]	; (800321c <AppTasks_RunSensor+0x90>)
  80031e8:	681b      	ldr	r3, [r3, #0]
  80031ea:	2140      	movs	r1, #64	; 0x40
@@ -6483,7 +6504,7 @@ void AppTasks_RunIrrigation(void *argument)
  8003252:	f7fe fd7f 	bl	8001d54 <IrrigationControl_ProcessCommand>
  8003256:	4603      	mov	r3, r0
  8003258:	72fb      	strb	r3, [r7, #11]
-            (void)osThreadFlagsSet(LoRaTaskHandle, result ? CONTROL_OK_SIGNAL : CONTROL_ERROR_SIGNAL);
+            osThreadFlagsSet(LoRaTaskHandle, result ? CONTROL_OK_SIGNAL : CONTROL_ERROR_SIGNAL);
  800325a:	4b0f      	ldr	r3, [pc, #60]	; (8003298 <AppTasks_RunIrrigation+0x70>)
  800325c:	681a      	ldr	r2, [r3, #0]
  800325e:	7afb      	ldrb	r3, [r7, #11]
@@ -6875,7 +6896,7 @@ void TelemetryManager_Service(void)
  8003506:	f000 febb 	bl	8004280 <HAL_GetTick>
  800350a:	6078      	str	r0, [r7, #4]
 
-    /* 1. Ưu tiên tuyệt đối frame đang nhận hoặc đang chờ xử lý.
+    /* 1. Ưu tiên frame đang nhận hoặc đang chờ xử lý.
      * Giữ nguyên telemetry_ready để gửi lại sau khi LoRaTask xử lý xong frame */
     if (frame_receive || frame_ready ||
  800350c:	4b33      	ldr	r3, [pc, #204]	; (80035dc <TelemetryManager_Service+0xdc>)
@@ -6947,7 +6968,7 @@ void TelemetryManager_Service(void)
  8003572:	2b00      	cmp	r3, #0
  8003574:	d12e      	bne.n	80035d4 <TelemetryManager_Service+0xd4>
 
-    /* 4. Tạo telemetry mới khi trạng thái vừa đổi hoặc khi hệ thống đang tưới
+    /* 4. Tạo telemetry mới khi state thay đổi or khi hệ thống đang tưới theo FSM (Auto)
      * và đã đến chu kỳ streaming tiếp theo. */
     if (telemetry_event_pending ||
  8003576:	4b20      	ldr	r3, [pc, #128]	; (80035f8 <TelemetryManager_Service+0xf8>)

@@ -15,7 +15,7 @@ void TelemetryManager_Service(void)
 {
     uint32_t now = HAL_GetTick();
 
-    /* 1. Ưu tiên tuyệt đối frame đang nhận hoặc đang chờ xử lý.
+    /* 1. Ưu tiên frame đang nhận hoặc đang chờ xử lý.
      * Giữ nguyên telemetry_ready để gửi lại sau khi LoRaTask xử lý xong frame */
     if (frame_receive || frame_ready ||
         (last_lora_rx_tick != 0U && (now - last_lora_rx_tick) < LORA_RX_TO_TX_GUARD_MS))
@@ -35,7 +35,7 @@ void TelemetryManager_Service(void)
     /* 3. Không tạo yêu cầu mới khi yêu cầu telemetry cũ vẫn đang xử lý. */
     if (telemetry_sensor_pending || telemetry_ready) return;
 
-    /* 4. Tạo telemetry mới khi trạng thái vừa đổi hoặc khi hệ thống đang tưới
+    /* 4. Tạo telemetry mới khi state thay đổi or khi hệ thống đang tưới theo FSM (Auto)
      * và đã đến chu kỳ streaming tiếp theo. */
     if (telemetry_event_pending ||
         (irr_mode == MODE_AUTO && IrrigationControl_IsActive() &&

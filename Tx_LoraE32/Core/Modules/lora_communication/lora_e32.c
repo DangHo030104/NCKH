@@ -69,7 +69,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
     if (uart->Instance != USART1) return;
 
     char c = (char)rx_byte;
-    last_lora_rx_tick = HAL_GetTick();
+    last_lora_rx_tick = HAL_GetTick();	// Lưu thời điểm nhận byte mới
 
     if (c == '<')
     {

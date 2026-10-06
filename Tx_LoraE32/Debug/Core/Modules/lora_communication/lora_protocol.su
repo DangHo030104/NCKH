@@ -2,5 +2,5 @@ lora_protocol.c:20:13:LoRaProtocol_SendAck	56	static
 lora_protocol.c:41:13:LoRaProtocol_SendData	224	static
 lora_protocol.c:68:13:LoRaProtocol_ProcessRequest	24	static
 lora_protocol.c:95:13:LoRaProtocol_ProcessCommand	32	static
-lora_protocol.c:146:6:LoRaProtocol_ProcessFrame	16	static
-lora_protocol.c:163:6:LoRaProtocol_SendTelemetry	256	static
+lora_protocol.c:147:6:LoRaProtocol_ProcessFrame	16	static
+lora_protocol.c:164:6:LoRaProtocol_SendTelemetry	256	static

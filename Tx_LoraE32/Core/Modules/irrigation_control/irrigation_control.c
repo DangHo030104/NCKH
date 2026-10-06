@@ -16,33 +16,39 @@ static float soil_stop_threshold[2] = {SOIL_STOP_THRESHOLD, SOIL_STOP_THRESHOLD}
 
 static uint8_t IrrigationControl_ParsePercent(const char *text, char delimiter, float *value)
 {
-    uint32_t whole = 0U;
-    uint32_t fraction = 0U;
-    uint32_t divisor = 1U;
-    uint8_t has_digit = 0U;
+    uint32_t whole = 0;    // Phần nguyên
+    uint32_t fraction = 0; // Phần thập phân
+    uint32_t divisor = 1;  // Hệ số chia để tính phần thập phân
+    uint8_t has_digit = 0; // Flag: kiểm tra có ít nhất một chữ số hợp lệ hay không
 
+    // Xử lý phần nguyên
     while (*text >= '0' && *text <= '9')
     {
-        has_digit = 1U;
-        whole = whole * 10U + (uint32_t)(*text - '0');
+        has_digit = 1;
+        whole = whole * 10 + (uint32_t)(*text - '0'); // Chuyển ký tự thành số và cộng vào phần nguyên
         text++;
     }
 
+    // Xử lý phần thập phân nếu có
     if (*text == '.')
     {
         text++;
         while (*text >= '0' && *text <= '9')
         {
-            has_digit = 1U;
-            fraction = fraction * 10U + (uint32_t)(*text - '0');
-            divisor *= 10U;
+            has_digit = 1;
+            fraction = fraction * 10 + (uint32_t)(*text - '0'); // Chuyển ký tự thành số và cộng vào phần thập phân
+            divisor *= 10;                                      // Cập nhật hệ số chia để tính phần thập phân
             text++;
         }
     }
 
-    if (!has_digit || *text != delimiter || divisor == 0U) return 0U;
+    // Kiểm tra điều kiện hợp lệ: có ít nhất một chữ số, ký tự tiếp theo là dấu phân cách và hệ số chia khác 0
+    if (!has_digit || *text != delimiter || divisor == 0)
+        return 0;
+
+    // Tính giá trị phần trăm cuối cùng
     *value = (float)whole + ((float)fraction / (float)divisor);
-    return 1U;
+    return 1;
 }
 
 static void IrrigationControl_ReleaseRelay(void)
@@ -93,13 +99,15 @@ uint8_t IrrigationControl_RequestMeasurement(void)
 void IrrigationControl_AutoUpdate(void)
 {
     /* MANUAL luôn có quyền ưu tiên đối với relay. */
-    if (relay_owner == RELAY_OWNER_MANUAL || irr_mode != MODE_AUTO) return;
+    if (relay_owner == RELAY_OWNER_MANUAL || irr_mode != MODE_AUTO)
+        return;
 
     /* Sau khi STM32 reboot hoặc vừa chuyển lại AUTO, không được quyết định tưới
      * bằng dữ liệu sensor cũ/chưa hợp lệ. */
     if (!sensor_data_valid)
     {
-        if (!irr_measure_pending) (void)IrrigationControl_RequestMeasurement();
+        if (!irr_measure_pending)
+            IrrigationControl_RequestMeasurement();
         return;
     }
 
@@ -108,179 +116,179 @@ void IrrigationControl_AutoUpdate(void)
         (HAL_GetTick() - last_sensor_update_tick) >= AUTO_SENSOR_INTERVAL_MS)
     {
         sensor_data_valid = 0;
-        (void)IrrigationControl_RequestMeasurement();
+        IrrigationControl_RequestMeasurement();
         return;
     }
 
     switch (irr_state)
     {
-        /* =====================================
-         * IDLE - CHỌN ZONE CẦN TƯỚI
-         * ===================================== */
-        case IRR_IDLE:
+    /* =====================================
+     * IDLE - CHỌN ZONE CẦN TƯỚI
+     * ===================================== */
+    case IRR_IDLE:
+    {
+        uint8_t zone1_dry = sm1 < soil_start_threshold[0];
+        uint8_t zone2_dry = sm2 < soil_start_threshold[1];
+
+        /* Không zone nào khô: bảo đảm toàn bộ relay đã OFF. */
+        if (!zone1_dry && !zone2_dry)
         {
-            uint8_t zone1_dry = sm1 < soil_start_threshold[0];
-            uint8_t zone2_dry = sm2 < soil_start_threshold[1];
-
-            /* Không zone nào khô: bảo đảm toàn bộ relay đã OFF. */
-            if (!zone1_dry && !zone2_dry)
+            if (relay_owner != RELAY_OWNER_NONE || valve1_state != VALVE_OFF || valve2_state != VALVE_OFF)
             {
-                if (relay_owner != RELAY_OWNER_NONE || valve1_state != VALVE_OFF || valve2_state != VALVE_OFF)
-                {
-                    RelayDriver_StopAll();
-                    IrrigationControl_ReleaseRelay();
-                }
-                return;
-            }
-
-            /* Nếu cả hai zone cùng khô, ưu tiên zone có độ ẩm thấp hơn. */
-            IrrigationControl_UseAutoRelay();
-            irr_state_start = HAL_GetTick();
-            if (zone1_dry && (!zone2_dry || sm1 <= sm2))
-            {
-                DebugConsole_Print(zone2_dry ? "[AUTO] Both dry -> Zone1 first\r\n" : "[AUTO] Select Zone1\r\n");
-                irr_state = IRR_ZONE1_WATERING;
-                RelayDriver_StartZone1();
-            }
-            else
-            {
-                DebugConsole_Print(zone1_dry ? "[AUTO] Both dry -> Zone2 first\r\n" : "[AUTO] Select Zone2\r\n");
-                irr_state = IRR_ZONE2_WATERING;
-                RelayDriver_StartZone2();
+                RelayDriver_StopAll();
+                IrrigationControl_ReleaseRelay();
             }
             return;
         }
 
-        case IRR_ZONE1_WATERING:
-            /* Kết thúc xung tưới Zone 1 rồi chuyển sang thời gian nghỉ thấm. */
-            if ((HAL_GetTick() - irr_state_start) >= WATER_PULSE_MS)
+        /* Nếu cả hai zone cùng khô, ưu tiên zone có độ ẩm thấp hơn. */
+        IrrigationControl_UseAutoRelay();
+        irr_state_start = HAL_GetTick();
+        if (zone1_dry && (!zone2_dry || sm1 <= sm2))
+        {
+            DebugConsole_Print(zone2_dry ? "[AUTO] Both dry -> Zone1 first\r\n" : "[AUTO] Select Zone1\r\n");
+            irr_state = IRR_ZONE1_WATERING;
+            RelayDriver_StartZone1();
+        }
+        else
+        {
+            DebugConsole_Print(zone1_dry ? "[AUTO] Both dry -> Zone2 first\r\n" : "[AUTO] Select Zone2\r\n");
+            irr_state = IRR_ZONE2_WATERING;
+            RelayDriver_StartZone2();
+        }
+        return;
+    }
+
+    case IRR_ZONE1_WATERING:
+        /* Kết thúc xung tưới Zone 1 rồi chuyển sang thời gian nghỉ thấm. */
+        if ((HAL_GetTick() - irr_state_start) >= WATER_PULSE_MS)
+        {
+            RelayDriver_StopCurrent(RELAY_OWNER_AUTO);
+            irr_state = IRR_ZONE1_SOAK;
+            irr_state_start = HAL_GetTick();
+            telemetry_event_pending = 1;
+        }
+        break;
+
+    case IRR_ZONE1_SOAK:
+        /* Sau khi nước thấm, publish phase MEASURE trước khi đánh thức SensorTask.
+         * Thứ tự này tránh SensorTask hoàn thành quá sớm và bỏ qua phase MEASURE. */
+        if ((HAL_GetTick() - irr_state_start) >= SOAK_TIME_MS)
+        {
+            irr_state = IRR_ZONE1_MEASURE;
+            irr_state_start = HAL_GetTick();
+            telemetry_event_pending = 1;
+            if (!IrrigationControl_RequestMeasurement())
             {
-                RelayDriver_StopCurrent(RELAY_OWNER_AUTO);
+                /* Gửi yêu cầu đo thất bại: quay lại SOAK để thử lại. */
                 irr_state = IRR_ZONE1_SOAK;
                 irr_state_start = HAL_GetTick();
-                telemetry_event_pending = 1;
             }
-            break;
+        }
+        break;
 
-        case IRR_ZONE1_SOAK:
-            /* Sau khi nước thấm, publish phase MEASURE trước khi đánh thức SensorTask.
-             * Thứ tự này tránh SensorTask hoàn thành quá sớm và bỏ qua phase MEASURE. */
-            if ((HAL_GetTick() - irr_state_start) >= SOAK_TIME_MS)
+    case IRR_ZONE1_MEASURE:
+        /* Chờ dữ liệu mới và giữ phase MEASURE đủ lâu để ESP32/TFT quan sát được. */
+        if (!irr_measure_pending && (HAL_GetTick() - irr_state_start) >= MEASURE_MIN_DISPLAY_MS)
+        {
+            if (sm1 >= soil_stop_threshold[0])
             {
-                irr_state = IRR_ZONE1_MEASURE;
+                /* Độ ẩm đạt ngưỡng: kết thúc chu kỳ và publish trạng thái ổn định. */
+                zone1_cycle = 0;
+                irr_state = IRR_IDLE;
+                irr_failed_zone = 0;
+                IrrigationControl_ReleaseRelay();
+            }
+            else if (++zone1_cycle >= MAX_IRRIGATION_CYCLE)
+            {
+                /* Giữ FAILED cho đến khi có lệnh đổi mode rõ ràng. */
+                DebugConsole_Print("[ERROR] Zone1 irrigation failed\r\n");
+                RelayDriver_StopAll();
+                irr_failed_zone = 1;
+                irr_state = IRR_FAILED;
+                IrrigationControl_ReleaseRelay();
+            }
+            else
+            {
+                /* Đất vẫn khô và chưa quá số chu kỳ: tưới thêm một xung. */
+                irr_state = IRR_ZONE1_WATERING;
                 irr_state_start = HAL_GetTick();
-                telemetry_event_pending = 1;
-                if (!IrrigationControl_RequestMeasurement())
-                {
-                    /* Gửi yêu cầu đo thất bại: quay lại SOAK để thử lại. */
-                    irr_state = IRR_ZONE1_SOAK;
-                    irr_state_start = HAL_GetTick();
-                }
+                RelayDriver_StartZone1();
             }
-            break;
+        }
+        break;
 
-        case IRR_ZONE1_MEASURE:
-            /* Chờ dữ liệu mới và giữ phase MEASURE đủ lâu để ESP32/TFT quan sát được. */
-            if (!irr_measure_pending && (HAL_GetTick() - irr_state_start) >= MEASURE_MIN_DISPLAY_MS)
-            {
-                if (sm1 >= soil_stop_threshold[0])
-                {
-                    /* Độ ẩm đạt ngưỡng: kết thúc chu kỳ và publish trạng thái ổn định. */
-                    zone1_cycle = 0;
-                    irr_state = IRR_IDLE;
-                    irr_failed_zone = 0;
-                    IrrigationControl_ReleaseRelay();
-                }
-                else if (++zone1_cycle >= MAX_IRRIGATION_CYCLE)
-                {
-                    /* Giữ FAILED cho đến khi có lệnh đổi mode rõ ràng. */
-                    DebugConsole_Print("[ERROR] Zone1 irrigation failed\r\n");
-                    RelayDriver_StopAll();
-                    irr_failed_zone = 1;
-                    irr_state = IRR_FAILED;
-                    IrrigationControl_ReleaseRelay();
-                }
-                else
-                {
-                    /* Đất vẫn khô và chưa quá số chu kỳ: tưới thêm một xung. */
-                    irr_state = IRR_ZONE1_WATERING;
-                    irr_state_start = HAL_GetTick();
-                    RelayDriver_StartZone1();
-                }
-            }
-            break;
+    case IRR_ZONE2_WATERING:
+        /* Kết thúc xung tưới Zone 2 rồi chuyển sang thời gian nghỉ thấm. */
+        if ((HAL_GetTick() - irr_state_start) >= WATER_PULSE_MS)
+        {
+            RelayDriver_StopCurrent(RELAY_OWNER_AUTO);
+            irr_state = IRR_ZONE2_SOAK;
+            irr_state_start = HAL_GetTick();
+            telemetry_event_pending = 1;
+        }
+        break;
 
-        case IRR_ZONE2_WATERING:
-            /* Kết thúc xung tưới Zone 2 rồi chuyển sang thời gian nghỉ thấm. */
-            if ((HAL_GetTick() - irr_state_start) >= WATER_PULSE_MS)
+    case IRR_ZONE2_SOAK:
+        /* Vào MEASURE trước khi gửi yêu cầu để phase không bị bỏ qua. */
+        if ((HAL_GetTick() - irr_state_start) >= SOAK_TIME_MS)
+        {
+            irr_state = IRR_ZONE2_MEASURE;
+            irr_state_start = HAL_GetTick();
+            telemetry_event_pending = 1;
+            if (!IrrigationControl_RequestMeasurement())
             {
-                RelayDriver_StopCurrent(RELAY_OWNER_AUTO);
+                /* Gửi yêu cầu đo thất bại: quay lại SOAK để thử lại. */
                 irr_state = IRR_ZONE2_SOAK;
                 irr_state_start = HAL_GetTick();
-                telemetry_event_pending = 1;
             }
-            break;
+        }
+        break;
 
-        case IRR_ZONE2_SOAK:
-            /* Vào MEASURE trước khi gửi yêu cầu để phase không bị bỏ qua. */
-            if ((HAL_GetTick() - irr_state_start) >= SOAK_TIME_MS)
+    case IRR_ZONE2_MEASURE:
+        /* Chờ dữ liệu mới và giữ phase MEASURE đủ lâu để ESP32/TFT quan sát được. */
+        if (!irr_measure_pending && (HAL_GetTick() - irr_state_start) >= MEASURE_MIN_DISPLAY_MS)
+        {
+            if (sm2 >= soil_stop_threshold[1])
             {
-                irr_state = IRR_ZONE2_MEASURE;
+                /* Độ ẩm đạt ngưỡng: kết thúc chu kỳ và publish trạng thái ổn định. */
+                zone2_cycle = 0;
+                irr_state = IRR_IDLE;
+                irr_failed_zone = 0;
+                IrrigationControl_ReleaseRelay();
+            }
+            else if (++zone2_cycle >= MAX_IRRIGATION_CYCLE)
+            {
+                /* Giữ FAILED cho đến khi có lệnh đổi mode rõ ràng. */
+                DebugConsole_Print("[ERROR] Zone2 irrigation failed\r\n");
+                RelayDriver_StopAll();
+                irr_failed_zone = 2;
+                irr_state = IRR_FAILED;
+                IrrigationControl_ReleaseRelay();
+            }
+            else
+            {
+                /* Đất vẫn khô và chưa quá số chu kỳ: tưới thêm một xung. */
+                irr_state = IRR_ZONE2_WATERING;
                 irr_state_start = HAL_GetTick();
-                telemetry_event_pending = 1;
-                if (!IrrigationControl_RequestMeasurement())
-                {
-                    /* Gửi yêu cầu đo thất bại: quay lại SOAK để thử lại. */
-                    irr_state = IRR_ZONE2_SOAK;
-                    irr_state_start = HAL_GetTick();
-                }
+                RelayDriver_StartZone2();
             }
-            break;
+        }
+        break;
 
-        case IRR_ZONE2_MEASURE:
-            /* Chờ dữ liệu mới và giữ phase MEASURE đủ lâu để ESP32/TFT quan sát được. */
-            if (!irr_measure_pending && (HAL_GetTick() - irr_state_start) >= MEASURE_MIN_DISPLAY_MS)
-            {
-                if (sm2 >= soil_stop_threshold[1])
-                {
-                    /* Độ ẩm đạt ngưỡng: kết thúc chu kỳ và publish trạng thái ổn định. */
-                    zone2_cycle = 0;
-                    irr_state = IRR_IDLE;
-                    irr_failed_zone = 0;
-                    IrrigationControl_ReleaseRelay();
-                }
-                else if (++zone2_cycle >= MAX_IRRIGATION_CYCLE)
-                {
-                    /* Giữ FAILED cho đến khi có lệnh đổi mode rõ ràng. */
-                    DebugConsole_Print("[ERROR] Zone2 irrigation failed\r\n");
-                    RelayDriver_StopAll();
-                    irr_failed_zone = 2;
-                    irr_state = IRR_FAILED;
-                    IrrigationControl_ReleaseRelay();
-                }
-                else
-                {
-                    /* Đất vẫn khô và chưa quá số chu kỳ: tưới thêm một xung. */
-                    irr_state = IRR_ZONE2_WATERING;
-                    irr_state_start = HAL_GetTick();
-                    RelayDriver_StartZone2();
-                }
-            }
-            break;
+    case IRR_FAILED:
+        /* Yêu cầu đổi mode rõ ràng trước khi AUTO được phép thử lại. */
+        return;
 
-        case IRR_FAILED:
-            /* Yêu cầu đổi mode rõ ràng trước khi AUTO được phép thử lại. */
-            return;
-
-        default:
-            /* State không hợp lệ: đưa output và FSM về trạng thái an toàn. */
-            RelayDriver_StopAll();
-            zone1_cycle = 0;
-            zone2_cycle = 0;
-            irr_state = IRR_IDLE;
-            irr_failed_zone = 0;
-            IrrigationControl_ReleaseRelay();
-            break;
+    default:
+        /* State không hợp lệ: đưa output và FSM về trạng thái an toàn. */
+        RelayDriver_StopAll();
+        zone1_cycle = 0;
+        zone2_cycle = 0;
+        irr_state = IRR_IDLE;
+        irr_failed_zone = 0;
+        IrrigationControl_ReleaseRelay();
+        break;
     }
 }
 
@@ -302,17 +310,18 @@ uint8_t IrrigationControl_ProcessCommand(void)
         if (zone_text != NULL && sscanf(zone_text, "ZONE=%u", &zone) == 1 &&
             start_text != NULL && IrrigationControl_ParsePercent(start_text + 6, ',', &start_threshold) &&
             stop_text != NULL && IrrigationControl_ParsePercent(stop_text + 5, '>', &stop_threshold) &&
-            (zone == 1U || zone == 2U) && start_threshold >= 0.0f &&
+            (zone == 1 || zone == 2) && start_threshold >= 0.0f &&
             stop_threshold <= 100.0f && start_threshold < stop_threshold)
         {
-            soil_start_threshold[zone - 1U] = start_threshold;
-            soil_stop_threshold[zone - 1U] = stop_threshold;
+            // Cập nhật ngưỡng tưới cho zone tương ứng
+            soil_start_threshold[zone - 1] = start_threshold;
+            soil_stop_threshold[zone - 1] = stop_threshold;
 
-            /* AUTO must use a fresh sample after its decision thresholds change. */
+            /* Khi ngưỡng thay đổi trong AUTO, STM32 hủy dữ liệu cảm biến cũ và yêu cầu đo lại trước khi đưa ra quyết định tiếp theo. */
             if (irr_mode == MODE_AUTO)
             {
                 sensor_data_valid = 0;
-                last_sensor_update_tick = 0;
+                last_sensor_update_tick = 0; // Reset timer để AUTO đo lại sensor ngay
             }
 
             char threshold_message[96];
@@ -477,9 +486,12 @@ uint8_t IrrigationControl_IsActive(void)
 uint8_t IrrigationControl_GetActiveZone(void)
 {
     /* Xác định zone active từ van thực tế và state machine AUTO. */
-    if (irr_state == IRR_FAILED) return irr_failed_zone;
-    if (valve1_state == VALVE_ON || irr_state == IRR_ZONE1_WATERING || irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE1_MEASURE) return 1;
-    if (valve2_state == VALVE_ON || irr_state == IRR_ZONE2_WATERING || irr_state == IRR_ZONE2_SOAK || irr_state == IRR_ZONE2_MEASURE) return 2;
+    if (irr_state == IRR_FAILED)
+        return irr_failed_zone;
+    if (valve1_state == VALVE_ON || irr_state == IRR_ZONE1_WATERING || irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE1_MEASURE)
+        return 1;
+    if (valve2_state == VALVE_ON || irr_state == IRR_ZONE2_WATERING || irr_state == IRR_ZONE2_SOAK || irr_state == IRR_ZONE2_MEASURE)
+        return 2;
     return 0;
 }
 
@@ -488,19 +500,27 @@ uint8_t IrrigationControl_GetPhase(void)
     /* Chuyển trạng thái nội bộ sang phase truyền qua LoRa:
      * 1=WATERING, 2=SOAK, 3=MEASURING, 4=FAILED. */
     if (irr_state == IRR_ZONE1_WATERING || irr_state == IRR_ZONE2_WATERING ||
-        (relay_owner == RELAY_OWNER_MANUAL && (valve1_state == VALVE_ON || valve2_state == VALVE_ON))) return 1;
-    if (irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE2_SOAK) return 2;
-    if (irr_state == IRR_ZONE1_MEASURE || irr_state == IRR_ZONE2_MEASURE) return 3;
-    if (irr_state == IRR_FAILED) return 4;
+        (relay_owner == RELAY_OWNER_MANUAL && (valve1_state == VALVE_ON || valve2_state == VALVE_ON)))
+        return 1;
+    if (irr_state == IRR_ZONE1_SOAK || irr_state == IRR_ZONE2_SOAK)
+        return 2;
+    if (irr_state == IRR_ZONE1_MEASURE || irr_state == IRR_ZONE2_MEASURE)
+        return 3;
+    if (irr_state == IRR_FAILED)
+        return 4;
     return 0;
 }
 
 uint8_t IrrigationControl_GetCycle(void)
 {
     /* Chu kỳ tưới chỉ có ý nghĩa trong AUTO; giá trị truyền đi bắt đầu từ 1. */
-    if (irr_mode != MODE_AUTO) return 0;
-    if (irr_state == IRR_FAILED) return MAX_IRRIGATION_CYCLE;
-    if (IrrigationControl_GetActiveZone() == 1) return zone1_cycle + 1U;
-    if (IrrigationControl_GetActiveZone() == 2) return zone2_cycle + 1U;
+    if (irr_mode != MODE_AUTO)
+        return 0;
+    if (irr_state == IRR_FAILED)
+        return MAX_IRRIGATION_CYCLE;
+    if (IrrigationControl_GetActiveZone() == 1)
+        return zone1_cycle + 1U;
+    if (IrrigationControl_GetActiveZone() == 2)
+        return zone2_cycle + 1U;
     return 0;
 }
