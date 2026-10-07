@@ -1,3 +1,4 @@
-power_manager.c:9:9:PowerManager_CanEnterStop	8	static
-power_manager.c:34:6:PowerManager_EnterStop	8	static,ignoring_inline_asm
-power_manager.c:68:6:HAL_GPIO_EXTI_Callback	16	static
+power_manager.c:11:9:PowerManager_CanEnterStop	8	static
+power_manager.c:36:9:PowerManager_EnterStop	8	static,ignoring_inline_asm
+power_manager.c:72:6:HAL_GPIO_EXTI_Callback	16	static
+power_manager.c:82:10:PowerManager_GetLoRaWakeIrqCount	4	static

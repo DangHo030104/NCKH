@@ -6,6 +6,8 @@
 
 extern void SystemClock_Config(void);
 
+static volatile uint32_t lora_wake_irq_count = 0;
+
 uint8_t PowerManager_CanEnterStop(void)
 {
 #if DEBUG_NO_STOP
@@ -31,7 +33,7 @@ uint8_t PowerManager_CanEnterStop(void)
     return 1;
 }
 
-void PowerManager_EnterStop(void)
+uint8_t PowerManager_EnterStop(void)
 {
     /* 1. Atomic final check: khóa IRQ để tránh bỏ lỡ sự kiện ngay trước WFI. */
     __disable_irq();
@@ -40,7 +42,7 @@ void PowerManager_EnterStop(void)
         __HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE))
     {
         __enable_irq();
-        return;
+        return 0;
     }
 
     /* 2. Xóa các cờ wake cũ để tránh vừa vào STOP đã thức dậy. */
@@ -63,10 +65,21 @@ void PowerManager_EnterStop(void)
 
     /* Khi enable IRQ, EXTI AUX đang pending sẽ set lora_wakeup_flag */
     __enable_irq();
+
+    return 1;
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t pin)
 {
     /* AUX falling edge báo E32 đánh thức STM32 để nhận frame LoRa. */
-    if (pin == LORA_AUX_PIN) lora_wakeup_flag = 1;
+    if (pin == LORA_AUX_PIN)
+    {
+        lora_wakeup_flag = 1;
+        lora_wake_irq_count++;
+    }
+}
+
+uint32_t PowerManager_GetLoRaWakeIrqCount(void)
+{
+    return lora_wake_irq_count;
 }

@@ -35,11 +35,9 @@ void TelemetryManager_Service(void)
     /* 3. Không tạo yêu cầu mới khi yêu cầu telemetry cũ vẫn đang xử lý. */
     if (telemetry_sensor_pending || telemetry_ready) return;
 
-    /* 4. Tạo telemetry mới khi state thay đổi or khi hệ thống đang tưới theo FSM (Auto)
+    /* 4. Tạo telemetry mới khi state thay đổi hoặc khi hệ thống đang tưới ở AUTO/MANUAL
      * và đã đến chu kỳ streaming tiếp theo. */
-    if (telemetry_event_pending ||
-        (irr_mode == MODE_AUTO && IrrigationControl_IsActive() &&
-         (now - last_telemetry_tick) >= TELEMETRY_INTERVAL_MS))
+    if (telemetry_event_pending || (IrrigationControl_IsActive() && (now - last_telemetry_tick) >= TELEMETRY_INTERVAL_MS))
     {
         telemetry_event_pending = 0;
         telemetry_sensor_pending = 1;

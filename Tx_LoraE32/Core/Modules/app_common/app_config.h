@@ -62,13 +62,13 @@
 #define SOIL_STOP_THRESHOLD 	55.0f
 
 /* Tưới theo xung, nghỉ cho nước thấm rồi đo lại; giới hạn tối đa 5 chu kỳ. */
-#define WATER_PULSE_MS 			5000U
-#define SOAK_TIME_MS 			10000U
+#define WATER_PULSE_MS 			2000U
+#define SOAK_TIME_MS 			20000U
 #define MEASURE_MIN_DISPLAY_MS 	1000U
 #define MAX_IRRIGATION_CYCLE 	5U
 
 /* RTC low-power wake-up interval. */
-#define RTC_WAKEUP_INTERVAL_SEC 15U
+#define RTC_WAKEUP_INTERVAL_SEC 30U
 
 /* Live telemetry chỉ chạy khi một chu kỳ tưới đang hoạt động. */
 #define TELEMETRY_INTERVAL_MS 	1000U     /* Yêu cầu snapshot mới mỗi 1 giây khi đang tưới. */
@@ -78,5 +78,8 @@
 
 /* Đặt bằng 1 để không vào STOP khi debug bằng CubeIDE. */
 #define DEBUG_NO_STOP 0
+
+/* Bật log chi tiết quá trình RTC/LoRa đánh thức STM32 qua UART2. */
+#define WAKE_DEBUG_LOG_ENABLE 1
 
 #endif

@@ -13,10 +13,67 @@
 #include "task.h"
 #include <stdio.h>
 
+#if WAKE_DEBUG_LOG_ENABLE
+static const char *AppTasks_GetIrrigationStateName(void)
+{
+    switch (irr_state)
+    {
+    case IRR_IDLE:            return "IDLE";
+    case IRR_ZONE1_WATERING:  return "ZONE1_WATERING";
+    case IRR_ZONE1_SOAK:      return "ZONE1_SOAK";
+    case IRR_ZONE1_MEASURE:   return "ZONE1_MEASURE";
+    case IRR_ZONE2_WATERING:  return "ZONE2_WATERING";
+    case IRR_ZONE2_SOAK:      return "ZONE2_SOAK";
+    case IRR_ZONE2_MEASURE:   return "ZONE2_MEASURE";
+    case IRR_FAILED:          return "FAILED";
+    default:                  return "UNKNOWN";
+    }
+}
+#endif
+
+static void AppTasks_LogWakeState(const char *stage)
+{
+#if WAKE_DEBUG_LOG_ENABLE
+    RTC_TimeTypeDef time = {0};
+    RTC_DateTypeDef date = {0};
+    char message[224];
+
+    HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN);
+    HAL_RTC_GetDate(&hrtc, &date, RTC_FORMAT_BIN);
+
+    snprintf(message, sizeof(message),
+             "[WAKE-TEST] %s | RTC=%02u:%02u:%02u | MODE=%s | STATE=%s | AUX=%s | "
+             "flags(RTC=%u,LORA=%u,FRAME=%u,RX=%u) | IRQ(RTC=%lu,LORA=%lu)\r\n",
+             stage,
+             (unsigned int)time.Hours,
+             (unsigned int)time.Minutes,
+             (unsigned int)time.Seconds,
+             irr_mode == MODE_AUTO ? "AUTO" : "MANUAL",
+             AppTasks_GetIrrigationStateName(),
+             HAL_GPIO_ReadPin(LORA_AUX_PORT, LORA_AUX_PIN) == GPIO_PIN_SET ? "HIGH" : "LOW",
+             (unsigned int)rtc_wakeup_flag,
+             (unsigned int)lora_wakeup_flag,
+             (unsigned int)frame_ready,
+             (unsigned int)frame_receive,
+             (unsigned long)RtcService_GetWakeIrqCount(),
+             (unsigned long)PowerManager_GetLoRaWakeIrqCount());
+    DebugConsole_Print(message);
+#else
+    (void)stage;
+#endif
+}
+
 /* LoRaTask xử lý LoRa, telemetry và Low power. */
 void AppTasks_RunLoRa(void *argument)
 {
     DebugConsole_Print("[RTOS] LoRaTask started\r\n");
+
+#if WAKE_DEBUG_LOG_ENABLE
+    DebugConsole_Print("[WAKE-TEST] UART2=115200 8N1 | RTC and LoRa AUX wake logging enabled\r\n");
+    AppTasks_LogWakeState("TASK START");
+#endif
+
+    uint32_t stop_cycle_count = 0;
 
     for (;;)
     {
@@ -45,28 +102,54 @@ void AppTasks_RunLoRa(void *argument)
         }
 
         /* E32 chuyển sang Power-Saving trước khi STM32 vào STOP. */
+        DebugConsole_Print("[POWER] System IDLE -> E32 POWER SAVING\r\n");
         LoRaE32_SetPowerSavingMode();
-        if (!LoRaE32_WaitReady(100)) continue;
+        if (!LoRaE32_WaitReady(100))
+        {
+            DebugConsole_Print("[ERROR] E32 power-saving mode not ready\r\n");
+            continue;
+        }
 
         /* AUX có thể đổi mức khi E32 chuyển mode: reset wake flags atomically. */
         __disable_irq();
 
         lora_wakeup_flag = 0;
-        rtc_wakeup_flag = 0;
         wake_source = WAKE_NONE;
         __HAL_GPIO_EXTI_CLEAR_IT(LORA_AUX_PIN);
         HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
 
         __enable_irq();
 
-        /* AUTO IDLE dùng RTC để Wake và đo sensor định kỳ. */
-        if (irr_mode == MODE_AUTO && irr_state == IRR_IDLE)
+        /* AUTO IDLE và FAILED đều cần RTC để tiếp tục cập nhật cảm biến.
+         * FAILED vẫn khóa relay - đo định kỳ không tự khởi động tưới lại. */
+        if (irr_mode == MODE_AUTO && (irr_state == IRR_IDLE || irr_state == IRR_FAILED))
         {
-            RtcService_SetAlarmAfterSeconds(RTC_WAKEUP_INTERVAL_SEC);
+            if (!RtcService_EnsureAlarmAfterSeconds(RTC_WAKEUP_INTERVAL_SEC))
+            {
+                DebugConsole_Print("[ERROR] RTC alarm could not be armed; STOP skipped\r\n");
+                osDelay(100);
+                continue;
+            }
+        }
+        else
+        {
+            RtcService_CancelAlarm();
         }
 
         /* STM32 vào STOP và tiếp tục tại đây sau khi RTC hoặc AUX đánh thức. */
-        PowerManager_EnterStop();
+        stop_cycle_count++;
+#if WAKE_DEBUG_LOG_ENABLE
+        char cycle_message[64];
+        snprintf(cycle_message, sizeof(cycle_message), "[WAKE-TEST] STOP cycle #%lu\r\n", (unsigned long)stop_cycle_count);
+        DebugConsole_Print(cycle_message);
+        AppTasks_LogWakeState("BEFORE STOP");
+#endif
+
+        DebugConsole_Print("[POWER] Enter STM32 STOP\r\n");
+
+        uint8_t entered_stop = PowerManager_EnterStop();
+
+        AppTasks_LogWakeState(entered_stop ? "AFTER STOP" : "STOP SKIPPED");
 
         __disable_irq();
 
@@ -76,6 +159,12 @@ void AppTasks_RunLoRa(void *argument)
         rtc_wakeup_flag = 0;
 
         __enable_irq();
+
+	    /* Duy trì và xử lý cả hai sự kiện khi RTC và LoRa cùng xuất hiện. */
+	    if (woke_by_lora && woke_by_rtc)
+	    {
+	        DebugConsole_Print("[WAKE-TEST] RTC and LoRa IRQ pending together; both events will be handled\r\n");
+	    }
 
         /* Nếu hai nguồn wake xảy ra đồng thời, ưu tiên CMD từ LoRa. */
 	    if(woke_by_lora)
@@ -89,30 +178,47 @@ void AppTasks_RunLoRa(void *argument)
 	    else
 	    {
 	        wake_source = WAKE_NONE;
+	        DebugConsole_Print("[WAKE-TEST] Wake source unknown\r\n");
 	        continue;
 	    }
 
-        if (wake_source == WAKE_RTC)
+        if (woke_by_rtc)
         {
-            /* RTC chỉ kích hoạt phép đo mới khi AUTO vẫn đang IDLE. */
-            if (irr_mode == MODE_AUTO && irr_state == IRR_IDLE)
+            DebugConsole_Print("[WAKE] Source = RTC ALARM\r\n");
+
+            /* Ở FAILED chỉ cập nhật cảm biến; FSM vẫn giữ lockout và không tưới lại. */
+            if (irr_mode == MODE_AUTO && (irr_state == IRR_IDLE || irr_state == IRR_FAILED))
             {
+                if (irr_state == IRR_FAILED)
+                {
+                    DebugConsole_Print("[AUTO] FAILED lockout -> sensor refresh only\r\n");
+                }
                 IrrigationControl_RequestMeasurement();
             }
 
-            wake_source = WAKE_NONE;
-            continue;	// Sleep lại
+            if (!woke_by_lora)
+            {
+                wake_source = WAKE_NONE;
+                continue;	// Sleep lại
+            }
         }
 
-        if (wake_source == WAKE_LORA)
+        if (woke_by_lora)
         {
+            DebugConsole_Print("[WAKE] Source = LoRa AUX\r\n");
+
             /* Chờ UART nhận đủ frame mà E32 vừa báo qua AUX. */
             if (!LoRaE32_WaitForFrame(FRAME_TIMEOUT_MS))
             {
+                DebugConsole_Print("[ERROR] LoRa wake but UART1 frame timeout\r\n");
                 frame_ready = 0;
                 wake_source = WAKE_NONE;
                 continue;
             }
+
+            DebugConsole_Print("[UART1] Wake frame received: ");
+            DebugConsole_Print(rx_frame_buffer);
+            DebugConsole_Print("\r\n");
             LoRaProtocol_ProcessFrame(rx_frame_buffer);
             frame_ready = 0;
             wake_source = WAKE_NONE;

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 uint8_t PowerManager_CanEnterStop(void);
-void PowerManager_EnterStop(void);
+uint8_t PowerManager_EnterStop(void);
+uint32_t PowerManager_GetLoRaWakeIrqCount(void);
 
 #endif
