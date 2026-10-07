@@ -32,7 +32,9 @@
 #define LORA_M1_PORT 	GPIOA
 #define LORA_M1_PIN 	GPIO_PIN_12
 
-#define BATTERY_ADC_CHANNEL ADC_CHANNEL_4  /* PA4 */
+#define BATTERY_ADC_CHANNEL 		ADC_CHANNEL_4  /* PA4 */
+#define SENSOR_ADC_SAMPLING_TIME 	ADC_SAMPLETIME_239CYCLES_5
+#define SOIL_ADC_SAMPLE_COUNT 		16U
 
 #define FRAME_TIMEOUT_MS 		1000U
 #define CMD_DUPLICATE_MS 		30000U          /* ESP32 retry window: tránh thực thi lại cùng CMD. */
@@ -77,9 +79,9 @@
 #define LORA_RX_TO_TX_GUARD_MS  30U       /* Giữ đường truyền ổn định sau byte RX cuối trước khi phát telemetry */
 
 /* Đặt bằng 1 để không vào STOP khi debug bằng CubeIDE. */
-#define DEBUG_NO_STOP 0
+#define DEBUG_NO_STOP 1
 
 /* Bật log chi tiết quá trình RTC/LoRa đánh thức STM32 qua UART2. */
-#define WAKE_DEBUG_LOG_ENABLE 1
+#define WAKE_DEBUG_LOG_ENABLE 0
 
 #endif

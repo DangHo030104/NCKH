@@ -62,7 +62,7 @@ static void LoRaProtocol_SendData(uint32_t sequence)
     HAL_UART_Transmit(&huart1, (uint8_t *)frame, strlen(frame), 500);
     last_lora_tx_tick = HAL_GetTick();
 
-    (void)LoRaE32_WaitReady(500);
+    LoRaE32_WaitReady(500);
 }
 
 static void LoRaProtocol_ProcessRequest(char *frame)
@@ -116,16 +116,16 @@ static void LoRaProtocol_ProcessCommand(char *frame)
     }
 
     /* 3. Copy command sang vùng dữ liệu dùng chung. */
-    strncpy(control_command, frame, sizeof(control_command) - 1U);
+    strncpy(control_command, frame, sizeof(control_command) - 1);
     control_command[sizeof(control_command) - 1U] = '\0';
 
     /* 4. Đánh thức IrrigationTask để thực thi command. */
     uint32_t flags = osThreadFlagsSet(IrrigationTaskHandle, CONTROL_EXEC_SIGNAL);
-    if ((flags & osFlagsError) != 0U) return;
+    if ((flags & osFlagsError) != 0) return;
 
     /* 5. Chờ kết quả thực thi trước khi quyết định gửi ACK. */
     flags = osThreadFlagsWait(CONTROL_OK_SIGNAL | CONTROL_ERROR_SIGNAL, osFlagsWaitAny, 2000);
-    if ((flags & osFlagsError) != 0U) return;
+    if ((flags & osFlagsError) != 0) return;
 
     if (flags & CONTROL_OK_SIGNAL)
     {
@@ -133,8 +133,8 @@ static void LoRaProtocol_ProcessCommand(char *frame)
         last_command_sequence = seq;
         last_command_tick = HAL_GetTick();
         last_command_valid = 1;
-        strncpy(last_command, frame, sizeof(last_command) - 1U);
-        last_command[sizeof(last_command) - 1U] = '\0';
+        strncpy(last_command, frame, sizeof(last_command) - 1);
+        last_command[sizeof(last_command) - 1] = '\0';
 
         LoRaProtocol_SendAck(seq);
     }
@@ -165,7 +165,7 @@ void LoRaProtocol_SendTelemetry(void)
 {
     char frame[128];
     LoRaE32_SetNormalMode();
-    if (!LoRaE32_WaitReady(100U)) return;
+    if (!LoRaE32_WaitReady(100)) return;
 
     /* Sequence 0 được bỏ qua để dễ nhận biết dữ liệu chưa khởi tạo. */
     if (++telemetry_sequence == 0) telemetry_sequence = 1;
@@ -178,7 +178,7 @@ void LoRaProtocol_SendTelemetry(void)
              IrrigationControl_GetActiveZone(), IrrigationControl_GetPhase(),
              IrrigationControl_GetCycle());
 
-    HAL_UART_Transmit(&huart1, (uint8_t *)frame, strlen(frame), 500U);
+    HAL_UART_Transmit(&huart1, (uint8_t *)frame, strlen(frame), 500);
     last_lora_tx_tick = HAL_GetTick();
 
     LoRaE32_WaitReady(500U);

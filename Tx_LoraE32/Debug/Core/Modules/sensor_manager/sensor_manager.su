@@ -1,4 +1,4 @@
-sensor_manager.c:11:17:SensorManager_ReadAdc	32	static
-sensor_manager.c:27:14:SensorManager_SoilPercent	32	static
-sensor_manager.c:39:6:SensorManager_Init	8	static
-sensor_manager.c:45:6:SensorManager_ReadAll	24	static
+sensor_manager.c:12:16:SensorManager_ReadAdc	40	static
+sensor_manager.c:55:14:SensorManager_SoilPercent	32	static
+sensor_manager.c:66:6:SensorManager_Init	8	static
+sensor_manager.c:78:6:SensorManager_ReadAll	32	static

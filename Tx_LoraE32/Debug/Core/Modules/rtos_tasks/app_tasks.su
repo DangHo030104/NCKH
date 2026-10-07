@@ -1,5 +1,4 @@
-app_tasks.c:17:20:AppTasks_GetIrrigationStateName	4	static
-app_tasks.c:34:13:AppTasks_LogWakeState	344	static
-app_tasks.c:67:6:AppTasks_RunLoRa	176	static,ignoring_inline_asm
+app_tasks.c:34:13:AppTasks_LogWakeState	16	static
+app_tasks.c:67:6:AppTasks_RunLoRa	112	static,ignoring_inline_asm
 app_tasks.c:238:6:AppTasks_RunSensor	24	static
 app_tasks.c:275:6:AppTasks_RunIrrigation	24	static

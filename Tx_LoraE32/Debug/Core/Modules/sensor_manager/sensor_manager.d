@@ -34,7 +34,8 @@ Core/Modules/sensor_manager/sensor_manager.o: \
  ../Core/Modules/system_manager/system_manager.h \
  ../Core/Modules/app_common/app_types.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
- ../Core/Lib/DHT11/DHT11.h ../Core/Lib/battery/battery.h
+ ../Core/Modules/debug_console/debug_console.h ../Core/Lib/DHT11/DHT11.h \
+ ../Core/Lib/battery/battery.h
 
 ../Core/Modules/sensor_manager/sensor_manager.h:
 
@@ -105,6 +106,8 @@ Core/Modules/sensor_manager/sensor_manager.o: \
 ../Core/Modules/app_common/app_types.h:
 
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
+
+../Core/Modules/debug_console/debug_console.h:
 
 ../Core/Lib/DHT11/DHT11.h:
 
