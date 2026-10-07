@@ -22,9 +22,10 @@
 #define TFT_SCLK 18
 #define TFT_MOSI 23
 
-/* WiFi */
-static const char *ssid = "Pho Tro Tret";
-static const char *password = "Ngoc4795";
+/* WiFi configuration portal */
+#define WIFI_CONFIG_BUTTON_PIN 0
+static const char *wifi_config_ap_ssid = "ESP32_Config";
+static const char *wifi_config_ap_password = "12345678";
 
 /* HIVEMQ CLOUD */
 static const char *mqtt_server = "10cf23427b77452faec8dc86e09f1bc1.s1.eu.hivemq.cloud";
@@ -58,5 +59,7 @@ const unsigned long SENSOR_STALE_TIMEOUT_MS = 2 * REQUEST_INTERVAL + DATA_TIMEOU
 
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
 const unsigned long WIFI_RECONNECT_INTERVAL = 5000;
+const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
+const unsigned long WIFI_RESET_HOLD_MS = 5000;
 
 #endif // RX_LORAE32_CONFIG_APPCONFIG_H

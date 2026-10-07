@@ -58,7 +58,7 @@ bool TaskManager_StartTasks(void)
     if (xTaskCreate(
         MQTTManager_Run,
         "MQTTTask",
-        4096,
+        6144,
         NULL,
         1,
         &mqttTaskHandle) != pdPASS) return false;
