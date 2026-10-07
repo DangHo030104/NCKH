@@ -35,13 +35,13 @@ static const char *mqtt_password = "D@ucffgh123";
 
 /* MQTT TOPIC */
 // ESP32 publish data sensor lên Web
-static const char *publish_topic = "iot/sensor/data/fb0f45aad57744a4ba70";
+static const char *publish_topic = "iot/sensor/data/ae21d58a097942caa8f7";
 
 // ESP32 nhận command từ Web
-static const char *subscribe_topic = "iot/device/control/fb0f45aad57744a4ba70";
+static const char *subscribe_topic = "iot/device/control/ae21d58a097942caa8f7";
 
 // ESP32 publish status CMD để Web hiển thị ngay.
-static const char *command_status_topic = "iot/device/control-status/fb0f45aad57744a4ba70";
+static const char *command_status_topic = "iot/device/control-status/ae21d58a097942caa8f7";
 
 /* CONFIGURATION PARAMETERS */
 const unsigned long REQUEST_INTERVAL = 60000;       // 60s
