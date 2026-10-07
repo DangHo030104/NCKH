@@ -39,18 +39,23 @@ static const char *publish_topic = "iot/sensor/data/fb0f45aad57744a4ba70";
 // ESP32 nhận command từ Web
 static const char *subscribe_topic = "iot/device/control/fb0f45aad57744a4ba70";
 
-// ESP32 publish ket qua xu ly CMD de Web hien thi ngay.
+// ESP32 publish status CMD để Web hiển thị ngay.
 static const char *command_status_topic = "iot/device/control-status/fb0f45aad57744a4ba70";
 
-const unsigned long REQUEST_INTERVAL = 30000;       // 30s
+/* CONFIGURATION PARAMETERS */
+const unsigned long REQUEST_INTERVAL = 60000;       // 60s
 const unsigned long DATA_TIMEOUT_MS = 5000;         // Time Wait DATA STM32 sau khi gửi REQ
 const unsigned long CMD_ACK_TIMEOUT_MS = 1000;      // Time Wait ACK STM32 sau khi gửi CMD
-const unsigned long CMD_RETRY_JITTER_MIN_MS = 80;   // Tránh retry trùng nhịp telemetry STM32
-const unsigned long CMD_RETRY_JITTER_MAX_MS = 280;
-const unsigned long TELEMETRY_TIMEOUT_MS = 2500;    // Resume polling if the live stream drop.
-// Allow two polling periods and a response window before marking data stale.
-const unsigned long SENSOR_STALE_TIMEOUT_MS = 2 * REQUEST_INTERVAL + DATA_TIMEOUT_MS;   // 65s
 const uint8_t MAX_CMD_RETRIES = 5;
+
+// Độ trễ ngẫu nhiên từ 80 đến 280 ms khi retry -> Tránh retry trùng telemetry STM32
+const unsigned long CMD_RETRY_JITTER_MIN_MS = 80;   
+const unsigned long CMD_RETRY_JITTER_MAX_MS = 280;
+const unsigned long TELEMETRY_TIMEOUT_MS = 2500;    // Resume polling if telemetry drop
+
+// Allow two polling periods and a response window before marking data stale
+const unsigned long SENSOR_STALE_TIMEOUT_MS = 2 * REQUEST_INTERVAL + DATA_TIMEOUT_MS;   // 125s
+
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
 const unsigned long WIFI_RECONNECT_INTERVAL = 5000;
 

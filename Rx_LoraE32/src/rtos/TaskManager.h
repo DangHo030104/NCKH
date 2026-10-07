@@ -4,9 +4,12 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
+/*  LoRa task <──LoRaCommand/CommandStatus──> MQTT task 
+ *   LoRa task ──mqttData──>    MQTT task 
+ *  LoRa task  ──displayData──> Display task */
 typedef struct
 {
-    QueueHandle_t commands;
+    QueueHandle_t commands;         
     QueueHandle_t commandStatus;
     QueueHandle_t mqttData;
     QueueHandle_t displayData;

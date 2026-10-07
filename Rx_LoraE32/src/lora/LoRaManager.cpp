@@ -47,6 +47,7 @@ static QueueHandle_t commandStatusQueue;
 static QueueHandle_t mqttDataQueue;
 static QueueHandle_t displayQueue;
 
+/* Phản hồi từng giai đoạn của CMD */
 static void reportCommandStatus(CommandStatusCode status)
 {
     CommandStatus report = {};
@@ -319,7 +320,7 @@ static void sendPendingCommand(const LoRaCommand &cmd)
         pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + ",ZONE=" +
                               String(cmd.zone) + ",IRR=" + String(cmd.irr ? "ON" : "OFF") + ">";
     }
-    else
+    else   
     {
         /* STM32 accepts: <CMD,SEQ=x,THR,ZONE=1|2,START=xx.x,STOP=yy.y> */
         pendingCommandFrame = "<CMD,SEQ=" + String(sequenceNumber) + ",THR,ZONE=" +
@@ -495,6 +496,11 @@ static void handleLoraTimeouts(void)
 
         if (commandRetryCount < MAX_CMD_RETRIES)
         {
+            /* VD: Nếu đang retry ON cũ nhưng đã có OFF mới, ESP32 sẽ: 
+             * 1. Hủy retry lệnh ON  
+             * 2. Báo lệnh cũ FAILED.
+             * 3. Trở lại LORA_IDLE.
+             * 4. Gửi lệnh OFF mới. */
             if (pendingCommand.type == COMMAND_IRRIGATION &&
                 pendingCommand.revision < readLatestZoneCommand(pendingCommand.zone))
             {
@@ -555,7 +561,7 @@ void LoRaManager_Run(void *pvParameters)
         /* TIMEOUT  */
         handleLoraTimeouts();
 
-        /* Lệnh điều khiển ưu tiên hơn REQ sensor đang chờ DATA. DATA đến muộn
+        /* Lệnh CMD ưu tiên hơn REQ sensor đang chờ DATA. DATA đến muộn
          * sẽ bị loại bằng SEQ sau khi CMD mới đã được gửi. */
         if (loraState == WAIT_DATA && uxQueueMessagesWaiting(commandQueue) > 0)
         {

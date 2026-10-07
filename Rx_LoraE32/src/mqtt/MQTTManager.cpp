@@ -22,8 +22,8 @@ static QueueHandle_t mqttDataQueue;
 static bool enqueueCommand(const LoRaCommand &cmd, bool highPriority)
 {
     BaseType_t queued = highPriority
-        ? xQueueSendToFront(commandQueue, &cmd, 0)
-        : xQueueSendToBack(commandQueue, &cmd, 0);
+        ? xQueueSendToFront(commandQueue, &cmd, 0)      // Đưa lệnh OFF lên đầu queue để tránh van bị bật lại sau khi vừa tắt.
+        : xQueueSendToBack(commandQueue, &cmd, 0);      // Lệnh bth đưa vào cuối queue (Lệnh MODE và THRESHOLD không cần ưu tiên).
 
     CommandStatus report = {};
     report.command = cmd;
@@ -87,6 +87,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
         thresholdCommand.startThreshold = startThreshold;
         thresholdCommand.stopThreshold = stopThreshold;
 
+        // Gửi lệnh threshold sang LoRaTask
         if (enqueueCommand(thresholdCommand, false))
         {
             Serial.printf("[MQTT] Threshold queued: ZONE=%d START=%.1f STOP=%.1f\n",
@@ -122,6 +123,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
             return;
         }
 
+        // Gửi lệnh MODE sang LoRaTask
         if (enqueueCommand(modeCommand, false))
         {
             Serial.print("[MQTT] CMD queued: MODE=");
@@ -149,7 +151,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
     LoRaCommand cmd = {};
     cmd.type = COMMAND_IRRIGATION;
     cmd.zone = relay;
-    cmd.revision = nextZoneCommand(relay);
+    cmd.revision = nextZoneCommand(relay);  
 
     if (strcmp(state, "ON") == 0)
     {
@@ -170,9 +172,11 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length)
     /* OFF được đưa lên đầu hàng đợi. revision giúp LoRaTask bỏ lệnh ON cũ
      * còn nằm phía sau, tránh van bị bật lại sau khi người dùng vừa tắt. */
     LoRaCommand queueHead = {};
+
+    // Nếu phía trước đang có lệnh đổi mode thì vẫn giữ lệnh mode đi trước
     bool modeMustRunFirst = xQueuePeek(commandQueue, &queueHead, 0) == pdPASS && queueHead.type == COMMAND_MODE;
-    if (enqueueCommand(cmd, !cmd.irr && !modeMustRunFirst))
-    {
+    if (enqueueCommand(cmd, !cmd.irr && !modeMustRunFirst)) 
+    {    
         Serial.print("[MQTT] CMD queued: ZONE=");
         Serial.print(cmd.zone);
         Serial.print(" IRR=");
@@ -301,6 +305,7 @@ void MQTTManager_Begin(QueueHandle_t commands, QueueHandle_t commandStatus, Queu
     commandQueue = commands;
     commandStatusQueue = commandStatus;
     mqttDataQueue = mqttData;
+    
     /* MQTT */
     secureClient.setInsecure();                   // Bỏ kiểm tra CA, TLS vẫn mã hóa
     mqttClient.setServer(mqtt_server, mqtt_port); // Cấu hình địa chỉ và cổng broker.
@@ -348,7 +353,8 @@ void MQTTManager_Run(void *pvParameters)
                 {
                     if (!publishCommandStatus(commandStatus))
                     {
-                        (void)xQueueSendToFront(commandStatusQueue, &commandStatus, 0);
+                        // Nếu publish thất bại, đưa lại vào đầu hàng đợi để retry lần sau.
+                        xQueueSendToFront(commandStatusQueue, &commandStatus, 0);
                         break;
                     }
                 }

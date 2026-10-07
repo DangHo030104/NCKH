@@ -2,8 +2,8 @@
 #include <Arduino.h>
 
 static DashboardStatus dashboardStatus;
-static portMUX_TYPE dashboardMux = portMUX_INITIALIZER_UNLOCKED;
-static uint32_t latestZoneCommand[2] = {0, 0};  // Lưu trữ cmd mới nhất của từng (zone 1 và zone 2)
+static portMUX_TYPE dashboardMux = portMUX_INITIALIZER_UNLOCKED;    // Spinlock để bảo vệ dashboardStatus khi đọc/ghi từ nhiều task khác nhau.
+static uint32_t latestZoneCommand[2] = {0, 0};                      // Lưu cmd mới nhất của từng zone
 
 
 // Copy shared status under a short lock; never draw or use MQTT under the lock.
@@ -29,7 +29,7 @@ void setWiFiDisplayState(bool online)
     portEXIT_CRITICAL(&dashboardMux);
 }
 
-// Increment and return the next command revision for a given zone (1 or 2).
+// Tăng revision khi nhận một CMD mới.
 uint32_t nextZoneCommand(uint8_t zone)
 {
     if (zone < 1 || zone > 2) return 0;
@@ -39,7 +39,7 @@ uint32_t nextZoneCommand(uint8_t zone)
     return revision;
 }
 
-// Đọc lệnh mới nhất của từng khu vực
+// LoRa task dùng để kiểm tra cmd sắp gửi or retry còn hợp lệ không.
 uint32_t readLatestZoneCommand(uint8_t zone)
 {
     if (zone < 1 || zone > 2) return 0;
